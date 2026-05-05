@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SignalPrism NDR</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" role="img">
+              <path class="mark-shell" d="M24 4 42 14v20L24 44 6 34V14L24 4Z"></path>
+              <path class="mark-prism" d="M15 16h18L24 33 15 16Z"></path>
+              <path class="mark-beam beam-one" d="M5 18h10"></path>
+              <path class="mark-beam beam-two" d="M33 19h10"></path>
+              <path class="mark-beam beam-three" d="M31 29h12"></path>
+              <circle class="mark-node" cx="15" cy="16" r="2.4"></circle>
+              <circle class="mark-node" cx="33" cy="16" r="2.4"></circle>
+              <circle class="mark-node" cx="24" cy="33" r="2.4"></circle>
+            </svg>
+          </div>
+          <div>
+            <p class="eyebrow">Cloud-native Network Detection &amp; Response</p>
+            <h1>SignalPrism NDR</h1>
+          </div>
+        </div>
+        <div class="status-pill" id="statusPill" role="status" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="statusText">No log loaded</span>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="ingest-panel" aria-label="Log input and filters">
+          <div class="panel-section">
+            <label class="drop-zone" id="dropZone">
+              <input id="fileInput" type="file" accept=".log,.txt,.csv,.gz,.json,.jsonl,text/plain,text/csv,application/json">
+              <span class="drop-icon" aria-hidden="true">+</span>
+              <span class="drop-title">Upload network evidence</span>
+              <span class="drop-meta" id="fileMeta">.log, .txt, .csv, .gz, or JSON</span>
+            </label>
+          </div>
+
+          <div class="panel-section">
+            <label for="pasteInput" class="field-label">Paste flow log text</label>
+            <textarea id="pasteInput" spellcheck="false" placeholder="version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status"></textarea>
+            <div class="button-row">
+              <button class="primary-button" id="analyzeButton" type="button">Analyze</button>
+              <button class="ghost-button" id="sampleButton" type="button">Sample</button>
+              <button class="ghost-button" id="clearButton" type="button">Clear</button>
+            </div>
+            <div class="form-message" id="inputMessage" role="alert" hidden></div>
+          </div>
+
+          <div class="panel-section filters">
+            <div class="section-heading">
+              <h2>Filters</h2>
+              <button class="link-button" id="resetFiltersButton" type="button">Reset</button>
+            </div>
+            <label class="field-label" for="searchInput">Search</label>
+            <input id="searchInput" type="search" placeholder="IP, ENI, port, action">
+
+            <label class="field-label" for="actionFilter">Action</label>
+            <select id="actionFilter">
+              <option value="all">All actions</option>
+              <option value="ACCEPT">ACCEPT</option>
+              <option value="REJECT">REJECT</option>
+            </select>
+
+            <label class="field-label" for="protocolFilter">Protocol</label>
+            <select id="protocolFilter">
+              <option value="all">All protocols</option>
+            </select>
+          </div>
+
+          <div class="panel-section import-quality" aria-label="Import quality">
+            <div class="section-heading">
+              <h2>Import Quality</h2>
+              <span class="severity-count" id="parseIssueCount">0</span>
+            </div>
+            <div class="quality-list" id="parseIssueList"></div>
+          </div>
+        </aside>
+
+        <section class="dashboard">
+          <nav class="tabs" aria-label="NDR analysis views" role="tablist">
+            <button class="tab active" id="overviewTab" type="button" role="tab" aria-selected="true" aria-controls="overviewPanel" data-tab="overview">Overview</button>
+            <button class="tab" id="detectionsTab" type="button" role="tab" aria-selected="false" aria-controls="detectionsPanel" data-tab="detections">Detections</button>
+            <button class="tab" id="entitiesTab" type="button" role="tab" aria-selected="false" aria-controls="entitiesPanel" data-tab="entities">Entities</button>
+            <button class="tab" id="recordsTab" type="button" role="tab" aria-selected="false" aria-controls="recordsPanel" data-tab="records">Records</button>
+            <button class="tab" id="huntTab" type="button" role="tab" aria-selected="false" aria-controls="huntPanel" data-tab="hunt">Hunt</button>
+            <button class="tab" id="coverageTab" type="button" role="tab" aria-selected="false" aria-controls="coveragePanel" data-tab="coverage">Coverage</button>
+            <button class="tab" id="pipelineTab" type="button" role="tab" aria-selected="false" aria-controls="pipelinePanel" data-tab="pipeline">Pipeline</button>
+            <button class="tab" id="casesTab" type="button" role="tab" aria-selected="false" aria-controls="casesPanel" data-tab="cases">Cases</button>
+            <button class="tab" id="topologyTab" type="button" role="tab" aria-selected="false" aria-controls="topologyPanel" data-tab="topology">Topology</button>
+            <button class="tab" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsPanel" data-tab="reports">Reports</button>
+          </nav>
+
+          <section class="tab-panel active" id="overviewPanel" role="tabpanel" aria-labelledby="overviewTab">
+            <div class="metric-grid" id="metricGrid"></div>
+
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Traffic over time</p>
+                    <h2>Bytes and rejects</h2>
+                  </div>
+                  <span class="panel-note" id="timeRangeLabel">-</span>
+                </div>
+                <div class="timeline" id="timelineChart" aria-label="Timeline chart"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Entity risk</p>
+                    <h2>Priority entities</h2>
+                  </div>
+                </div>
+                <div class="rank-list" id="priorityEntities"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Destinations</p>
+                    <h2>Top destination ports</h2>
+                  </div>
+                </div>
+                <div class="rank-list" id="topPorts"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="detectionsPanel" role="tabpanel" aria-labelledby="detectionsTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Detection queue</p>
+                    <h2>Investigations</h2>
+                  </div>
+                  <div class="header-actions">
+                    <label class="sr-only" for="severityFilter">Detection severity</label>
+                    <select class="compact-select" id="severityFilter">
+                      <option value="all">All</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                    <span class="severity-count" id="findingCount">0</span>
+                    <button class="ghost-button compact" id="exportDetectionsButton" type="button">Export</button>
+                  </div>
+                </div>
+                <div class="finding-list" id="findingList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Case action</p>
+                    <h2>Create investigation case</h2>
+                  </div>
+                  <button class="ghost-button compact" id="createCaseFromTopDetectionButton" type="button">Create From Top Detection</button>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="caseQuickTitleInput">Case title</label>
+                  <input id="caseQuickTitleInput" type="text" placeholder="Suspicious public admin access">
+                  <label class="field-label" for="caseQuickAssigneeInput">Assignee</label>
+                  <input id="caseQuickAssigneeInput" type="text" placeholder="SOC analyst">
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Blocked activity</p>
+                    <h2>Top rejected targets</h2>
+                  </div>
+                </div>
+                <div class="rank-list" id="topRejected"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Telemetry mix</p>
+                    <h2>Protocol mix</h2>
+                  </div>
+                </div>
+                <div class="rank-list" id="protocolMix"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="entitiesPanel" role="tabpanel" aria-labelledby="entitiesTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Assets and peers</p>
+                    <h2>Entity risk leaderboard</h2>
+                  </div>
+                  <span class="panel-note" id="entityCountLabel">0 entities</span>
+                </div>
+                <div class="entity-list" id="entityRiskList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Entity timeline</p>
+                    <h2 id="entityDetailTitle">Select an entity</h2>
+                  </div>
+                  <span class="panel-note" id="entityDetailMeta">No entity selected</span>
+                </div>
+                <div class="entity-detail" id="entityDetail"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Lateral movement</p>
+                    <h2>Internal paths</h2>
+                  </div>
+                </div>
+                <div class="rank-list" id="internalPaths"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Internet exposure</p>
+                    <h2>External paths</h2>
+                  </div>
+                </div>
+                <div class="rank-list" id="externalPaths"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="recordsPanel" role="tabpanel" aria-labelledby="recordsTab" hidden>
+            <article class="panel records-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Filtered records</p>
+                  <h2 id="recordCountLabel">0 records</h2>
+                </div>
+                <button class="ghost-button compact" id="exportButton" type="button">Export CSV</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <caption class="sr-only">Filtered VPC Flow Log evidence records</caption>
+                  <thead id="recordsTableHead">
+                    <tr>
+                      <th><button class="th-button active" type="button" data-sort="start">Time</button></th>
+                      <th><button class="th-button" type="button" data-sort="action">Action</button></th>
+                      <th><button class="th-button" type="button" data-sort="source">Source</button></th>
+                      <th><button class="th-button" type="button" data-sort="destination">Destination</button></th>
+                      <th><button class="th-button" type="button" data-sort="protocol">Protocol</button></th>
+                      <th><button class="th-button" type="button" data-sort="packets">Packets</button></th>
+                      <th><button class="th-button" type="button" data-sort="bytes">Bytes</button></th>
+                      <th><button class="th-button" type="button" data-sort="logStatus">Status</button></th>
+                    </tr>
+                  </thead>
+                  <tbody id="recordsTable"></tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
+          <section class="tab-panel" id="huntPanel" role="tabpanel" aria-labelledby="huntTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Advanced hunt</p>
+                    <h2>Query evidence</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="saveHuntButton" type="button">Save Hunt</button>
+                    <button class="ghost-button compact" id="runHuntButton" type="button">Run</button>
+                  </div>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="huntInput">Query</label>
+                  <input id="huntInput" type="search" placeholder="src:10.0.1.15 dst:8.8.8.8 port:443 action:ACCEPT proto:TCP bytes>100000 risk>50">
+                  <div class="hint-row">Fields: src, dst, port, action, proto, status, eni, bytes&gt;, bytes&lt;, packets&gt;, risk&gt;, app</div>
+                  <div class="table-wrap compact-table">
+                    <table>
+                      <caption class="sr-only">Advanced hunt results</caption>
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Source</th>
+                          <th>Destination</th>
+                          <th>Action</th>
+                          <th>App</th>
+                          <th>Bytes</th>
+                        </tr>
+                      </thead>
+                      <tbody id="huntResultsTable"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Saved hunts</p>
+                    <h2>Reusable queries</h2>
+                  </div>
+                  <button class="ghost-button compact" id="clearHuntsButton" type="button">Clear</button>
+                </div>
+                <div class="rank-list" id="savedHuntsList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Observations</p>
+                    <h2>Hunting leads</h2>
+                  </div>
+                  <span class="severity-count" id="observationCount">0</span>
+                </div>
+                <div class="finding-list" id="observationList"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="coveragePanel" role="tabpanel" aria-labelledby="coverageTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Visibility</p>
+                    <h2>Coverage and blind spots</h2>
+                  </div>
+                  <span class="panel-note" id="coverageScoreLabel">0% covered</span>
+                </div>
+                <div class="coverage-grid" id="coverageGrid"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Expected sources</p>
+                    <h2>Source watchlist</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="clearSourcesButton" type="button">Clear</button>
+                    <button class="ghost-button compact" id="saveSourceButton" type="button">Save</button>
+                  </div>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="sourceNameInput">Name</label>
+                  <input id="sourceNameInput" type="text" placeholder="Prod AWS VPC">
+                  <label class="field-label" for="sourceScopeInput">Expected ENIs or CIDRs</label>
+                  <textarea id="sourceScopeInput" class="short-textarea" spellcheck="false" placeholder="eni-0a1b2c3d&#10;eni-0e4f5a6b&#10;10.0.0.0/16"></textarea>
+                  <div class="quality-list" id="sourceWatchlist"></div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">History</p>
+                    <h2>Ingest runs</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="clearHistoryButton" type="button">Clear</button>
+                    <button class="ghost-button compact" id="deleteBaselineButton" type="button">Delete Baseline</button>
+                    <button class="ghost-button compact" id="saveBaselineButton" type="button">Save Baseline</button>
+                  </div>
+                </div>
+                <div class="rank-list" id="historyList"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="pipelinePanel" role="tabpanel" aria-labelledby="pipelineTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Enrichment</p>
+                    <h2>DNS, TLS, HTTP, app metadata</h2>
+                  </div>
+                  <button class="ghost-button compact" id="applyEnrichmentButton" type="button">Apply</button>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="enrichmentInput">Paste JSONL or CSV metadata</label>
+                  <textarea id="enrichmentInput" spellcheck="false" placeholder='{"ip":"203.0.113.82","domain":"api.example.com","sni":"api.example.com","ja3":"...","app":"SaaS","category":"Business"}'></textarea>
+                  <div class="hint-row">Accepted keys: ip, dst, domain, sni, host, ja3, certIssuer, app, category, ai.</div>
+                </div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Cloud ingest</p>
+                    <h2>S3 and CloudWatch</h2>
+                  </div>
+                  <span class="panel-note" id="backendStatusLabel">Backend not checked</span>
+                </div>
+                <div class="auth-strip" aria-live="polite">
+                  <div>
+                    <p class="panel-kicker">Access</p>
+                    <h3 id="authStatusLabel">Checking session</h3>
+                    <span class="panel-note" id="authRoleLabel">Backend permissions are loading.</span>
+                  </div>
+                  <div class="auth-key-field">
+                    <label class="field-label" for="apiKeyInput">API key</label>
+                    <input id="apiKeyInput" type="password" autocomplete="off" placeholder="x-ndr-api-key">
+                  </div>
+                  <div class="auth-actions">
+                    <button class="ghost-button compact" id="saveApiKeyButton" type="button">Save Key</button>
+                    <button class="ghost-button compact" id="ssoLoginButton" type="button">SSO Login</button>
+                    <button class="ghost-button compact" id="ssoLogoutButton" type="button">Sign Out</button>
+                  </div>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <h3>S3 Flow Logs</h3>
+                    <label class="field-label" for="s3RegionInput">Region</label>
+                    <input id="s3RegionInput" type="text" placeholder="us-east-1">
+                    <label class="field-label" for="s3BucketInput">Bucket</label>
+                    <input id="s3BucketInput" type="text" placeholder="my-vpc-flow-log-bucket">
+                    <label class="field-label" for="s3PrefixInput">Prefix</label>
+                    <input id="s3PrefixInput" type="text" placeholder="AWSLogs/123456789012/vpcflowlogs/">
+                    <button class="ghost-button compact" id="ingestS3Button" type="button">Ingest S3</button>
+                  </div>
+                  <div>
+                    <h3>CloudWatch Logs</h3>
+                    <label class="field-label" for="cwRegionInput">Region</label>
+                    <input id="cwRegionInput" type="text" placeholder="us-east-1">
+                    <label class="field-label" for="cwGroupInput">Log group</label>
+                    <input id="cwGroupInput" type="text" placeholder="/aws/vpc/flowlogs/prod">
+                    <label class="field-label" for="cwFilterInput">Filter pattern</label>
+                    <input id="cwFilterInput" type="text" placeholder="REJECT">
+                    <button class="ghost-button compact" id="ingestCloudWatchButton" type="button">Ingest CloudWatch</button>
+                  </div>
+                  <div>
+                    <h3>Scheduled Job</h3>
+                    <label class="field-label" for="jobNameInput">Name</label>
+                    <input id="jobNameInput" type="text" placeholder="Prod VPC flow import">
+                    <label class="field-label" for="jobTypeInput">Type</label>
+                    <select id="jobTypeInput">
+                      <option value="s3">S3</option>
+                      <option value="cloudwatch">CloudWatch</option>
+                    </select>
+                    <label class="field-label" for="jobIntervalInput">Interval minutes</label>
+                    <input id="jobIntervalInput" type="number" min="5" value="15">
+                    <button class="ghost-button compact" id="createJobButton" type="button">Create Job</button>
+                  </div>
+                </div>
+                <div class="rank-list" id="backendJobsList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Application intelligence</p>
+                    <h2>Top applications</h2>
+                  </div>
+                </div>
+                <div class="rank-list" id="applicationMix"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Optimization</p>
+                    <h2>Traffic reduction simulator</h2>
+                  </div>
+                </div>
+                <div class="tool-body">
+                  <label class="check-row"><input id="dropAcceptedDns" type="checkbox"> Drop accepted DNS metadata</label>
+                  <label class="check-row"><input id="dropNoData" type="checkbox" checked> Drop NODATA records</label>
+                  <label class="check-row"><input id="dedupeFlows" type="checkbox" checked> Dedupe identical flows</label>
+                  <label class="field-label" for="sampleRateInput">Sampling rate</label>
+                  <input id="sampleRateInput" type="range" min="10" max="100" value="100">
+                  <div class="metric-inline" id="optimizationResult">0% reduction</div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="casesPanel" role="tabpanel" aria-labelledby="casesTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Case intake</p>
+                    <h2>Create or update case</h2>
+                  </div>
+                  <button class="ghost-button compact" id="saveCaseButton" type="button">Save Case</button>
+                </div>
+                <div class="tool-body">
+                  <input id="caseIdInput" type="hidden">
+                  <label class="field-label" for="caseTitleInput">Title</label>
+                  <input id="caseTitleInput" type="text" placeholder="Investigate repeated SSH rejects">
+                  <label class="field-label" for="caseAssigneeInput">Assignee</label>
+                  <input id="caseAssigneeInput" type="text" placeholder="Analyst name">
+                  <label class="field-label" for="caseStatusInput">Status</label>
+                  <select id="caseStatusInput">
+                    <option value="New">New</option>
+                    <option value="Triage">Triage</option>
+                    <option value="Investigating">Investigating</option>
+                    <option value="Contained">Contained</option>
+                    <option value="Closed">Closed</option>
+                  </select>
+                  <label class="field-label" for="caseSeverityInput">Severity</label>
+                  <select id="caseSeverityInput">
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <label class="field-label" for="caseNotesInput">Notes</label>
+                  <textarea id="caseNotesInput" class="short-textarea" spellcheck="true" placeholder="What has been validated? What is the next action?"></textarea>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Queue</p>
+                    <h2>Cases</h2>
+                  </div>
+                  <span class="severity-count" id="caseCountLabel">0</span>
+                </div>
+                <div class="entity-list" id="caseList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Audit</p>
+                    <h2 id="caseAuditTitle">Case audit log</h2>
+                  </div>
+                </div>
+                <div class="quality-list" id="caseAuditList"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="topologyPanel" role="tabpanel" aria-labelledby="topologyTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Visual topology</p>
+                    <h2>Entity-to-entity paths</h2>
+                  </div>
+                  <span class="panel-note" id="replayTimeLabel">All evidence</span>
+                </div>
+                <div class="topology-canvas" id="topologyCanvas"></div>
+                <div class="tool-body">
+                  <label class="field-label" for="replayRangeInput">Time replay</label>
+                  <input id="replayRangeInput" type="range" min="0" max="100" value="100">
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="reportsPanel" role="tabpanel" aria-labelledby="reportsTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">AWS Bedrock</p>
+                    <h2>AI investigation assistant</h2>
+                  </div>
+                  <span class="panel-note" id="aiStatusLabel">AI disabled</span>
+                </div>
+                <div class="tool-body ai-assistant">
+                  <div>
+                    <label class="field-label" for="aiQuestionInput">Question</label>
+                    <textarea id="aiQuestionInput" class="short-textarea" spellcheck="true" placeholder="Which entities should I investigate first and why?"></textarea>
+                    <div class="button-row ai-actions">
+                      <button class="ghost-button compact" id="askAiButton" type="button">Ask</button>
+                      <button class="ghost-button compact" id="summarizeAiButton" type="button">Summarize</button>
+                      <button class="ghost-button compact" id="clearAiButton" type="button">Clear</button>
+                    </div>
+                  </div>
+                  <div class="ai-answer" id="aiAnswerPanel" aria-live="polite">
+                    <div class="empty-state">
+                      <strong>No AI response yet</strong>
+                      <span>Enable Bedrock on the backend, analyze evidence, then ask a question.</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Analyst assistant</p>
+                    <h2>Investigation summary</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="copySummaryButton" type="button">Copy</button>
+                    <button class="ghost-button compact" id="exportJsonButton" type="button">JSON</button>
+                    <button class="ghost-button compact" id="exportOcsfButton" type="button">OCSF</button>
+                    <button class="ghost-button compact" id="exportCefButton" type="button">CEF</button>
+                  </div>
+                </div>
+                <div class="report-block" id="analystSummary"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Response engineering</p>
+                    <h2>Policy recommendations</h2>
+                  </div>
+                </div>
+                <div class="finding-list" id="policyRecommendations"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Privacy</p>
+                    <h2>Redacted export</h2>
+                  </div>
+                  <button class="ghost-button compact" id="exportRedactedButton" type="button">Export</button>
+                </div>
+                <div class="tool-body">
+                  <label class="check-row"><input id="maskIps" type="checkbox" checked> Mask IP addresses</label>
+                  <label class="check-row"><input id="maskAccounts" type="checkbox" checked> Mask account IDs and ENIs</label>
+                  <label class="check-row"><input id="maskDomains" type="checkbox" checked> Mask enrichment domains</label>
+                </div>
+              </article>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <template id="emptyStateTemplate">
+      <div class="empty-state">
+        <strong>No matching records</strong>
+        <span>Adjust filters or load a VPC flow log.</span>
+      </div>
+    </template>
+
+    <div class="toast-region" id="toastRegion" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <dialog class="confirm-dialog" id="confirmDialog" aria-labelledby="confirmTitle">
+      <form method="dialog">
+        <h2 id="confirmTitle">Confirm action</h2>
+        <p id="confirmBody">This action cannot be undone.</p>
+        <div class="dialog-actions">
+          <button class="ghost-button compact" id="cancelConfirmButton" value="cancel" type="submit">Cancel</button>
+          <button class="primary-button compact danger-button" id="acceptConfirmButton" value="confirm" type="submit">Confirm</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "ndr-flow-console",
+  "version": "0.2.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "node scripts/build.mjs",
+    "smoke": "node smoke-test.js",
+    "integration": "node integration-test.mjs",
+    "check": "node --check app.js && node --check server.mjs && node --check src/aws-sigv4.mjs && node --check integration-test.mjs && node smoke-test.js && node integration-test.mjs"
+  }
+}
