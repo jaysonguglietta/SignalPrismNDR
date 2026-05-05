@@ -2,6 +2,23 @@
 
 SignalPrism NDR is a local and cloud-ready Network Detection and Response console for uploading or ingesting AWS VPC Flow Logs and reviewing traffic volume, rejected flows, top ports, detections, entity risk, internal paths, external paths, and filtered evidence records.
 
+## Documentation
+
+- [Documentation Index](docs/README.md)
+- [Product Brief](docs/PRODUCT_BRIEF.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [API Reference](docs/API.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Data And Detections](docs/DATA_AND_DETECTIONS.md)
+- [Bedrock AI Assistant](docs/BEDROCK_AI.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Operations Runbook](docs/OPERATIONS_RUNBOOK.md)
+- [Developer Guide](docs/DEVELOPER_GUIDE.md)
+- [Security Notes](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+
 ## Open
 
 Open `index.html` in a browser for local file-only analysis.

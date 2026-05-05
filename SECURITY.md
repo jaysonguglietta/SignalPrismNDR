@@ -2,11 +2,28 @@
 
 SignalPrism NDR is designed as a local or privately deployed security workbench.
 
+For broader operational, architecture, and deployment context, see:
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Operations Runbook](docs/OPERATIONS_RUNBOOK.md)
+- [Bedrock AI Assistant](docs/BEDROCK_AI.md)
+
 ## Secrets
 
 - Do not commit AWS credentials or `NDR_API_KEY`.
 - Use IAM roles in production where possible.
 - Use `AWS_SESSION_TOKEN` for temporary credentials.
+
+## Reporting Security Issues
+
+Do not open public issues for suspected secrets exposure, authentication bypass, data leakage, or IAM privilege problems. Contact the repository owner directly and include:
+
+- A concise impact summary.
+- Affected commit, deployment mode, or configuration.
+- Reproduction steps when safe to share.
+- Any logs or screenshots with sensitive values redacted.
 
 ## API Access
 
