@@ -44,6 +44,23 @@
             </label>
           </div>
 
+          <div class="panel-section workspace-card">
+            <div class="section-heading">
+              <h2>Investigation</h2>
+              <button class="link-button" id="loadDemoButton" type="button">Demo</button>
+            </div>
+            <label class="field-label" for="workspaceSelect">Workspace</label>
+            <select id="workspaceSelect"></select>
+            <label class="field-label" for="workspaceNameInput">Workspace name</label>
+            <input id="workspaceNameInput" type="text" placeholder="Prod VPC investigation">
+            <div class="button-row">
+              <button class="ghost-button" id="newWorkspaceButton" type="button">New</button>
+              <button class="ghost-button" id="saveWorkspaceButton" type="button">Save</button>
+              <button class="ghost-button" id="exportPackageButton" type="button">Package</button>
+            </div>
+            <div class="hint-row" id="workspaceMeta">No workspace saved yet.</div>
+          </div>
+
           <div class="panel-section">
             <label for="pasteInput" class="field-label">Paste flow log text</label>
             <textarea id="pasteInput" spellcheck="false" placeholder="version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status"></textarea>
@@ -157,6 +174,25 @@
                   </div>
                 </div>
                 <div class="finding-list" id="findingList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Detection policy</p>
+                    <h2>Rule tuning</h2>
+                  </div>
+                  <button class="ghost-button compact" id="applyRuleProfileButton" type="button">Apply</button>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="ruleProfileSelect">Profile</label>
+                  <select id="ruleProfileSelect">
+                    <option value="balanced">Balanced</option>
+                    <option value="strict">Strict</option>
+                    <option value="focused">Focused</option>
+                  </select>
+                  <div class="hint-row" id="ruleProfileDescription">Balanced keeps the default detection mix for triage.</div>
+                </div>
               </article>
 
               <article class="panel wide">
@@ -360,8 +396,20 @@
                 <div class="tool-body">
                   <label class="field-label" for="sourceNameInput">Name</label>
                   <input id="sourceNameInput" type="text" placeholder="Prod AWS VPC">
-                  <label class="field-label" for="sourceScopeInput">Expected ENIs or CIDRs</label>
-                  <textarea id="sourceScopeInput" class="short-textarea" spellcheck="false" placeholder="eni-0a1b2c3d&#10;eni-0e4f5a6b&#10;10.0.0.0/16"></textarea>
+                  <label class="field-label" for="sourceTypeInput">Source type</label>
+                  <select id="sourceTypeInput">
+                    <option value="AWS VPC">AWS VPC</option>
+                    <option value="AWS Account">AWS Account</option>
+                    <option value="CloudWatch Log Group">CloudWatch Log Group</option>
+                    <option value="S3 Prefix">S3 Prefix</option>
+                    <option value="Subnet">Subnet</option>
+                  </select>
+                  <label class="field-label" for="sourceAccountInput">Account or owner</label>
+                  <input id="sourceAccountInput" type="text" placeholder="123456789012 / Cloud Platform">
+                  <label class="field-label" for="sourceRegionInput">Region</label>
+                  <input id="sourceRegionInput" type="text" placeholder="us-east-1">
+                  <label class="field-label" for="sourceScopeInput">Expected ENIs, CIDRs, log groups, or prefixes</label>
+                  <textarea id="sourceScopeInput" class="short-textarea" spellcheck="false" placeholder="eni-0a1b2c3d&#10;eni-0e4f5a6b&#10;10.0.0.0/16&#10;/aws/vpc/flowlogs/prod"></textarea>
                   <div class="quality-list" id="sourceWatchlist"></div>
                 </div>
               </article>
@@ -580,6 +628,16 @@
                 </div>
                 <div class="tool-body ai-assistant">
                   <div>
+                    <label class="field-label" for="aiPromptPreset">Preset</label>
+                    <select id="aiPromptPreset">
+                      <option value="">Custom question</option>
+                      <option value="Which entities should I investigate first and why?">Top risk explanation</option>
+                      <option value="Create a concise executive summary of this investigation with confidence and caveats.">Executive summary</option>
+                      <option value="Explain the likely attack path or lateral movement path in this evidence.">Attack path</option>
+                      <option value="Recommend containment and validation steps based only on this evidence.">Containment plan</option>
+                      <option value="What evidence gaps or blind spots should I resolve before escalation?">Evidence gaps</option>
+                      <option value="Suggest SIEM hunt queries or detection ideas based on these findings.">SIEM query ideas</option>
+                    </select>
                     <label class="field-label" for="aiQuestionInput">Question</label>
                     <textarea id="aiQuestionInput" class="short-textarea" spellcheck="true" placeholder="Which entities should I investigate first and why?"></textarea>
                     <div class="button-row ai-actions">
@@ -605,6 +663,7 @@
                   </div>
                   <div class="header-actions">
                     <button class="ghost-button compact" id="copySummaryButton" type="button">Copy</button>
+                    <button class="ghost-button compact" id="exportInvestigationPackageButton" type="button">Package</button>
                     <button class="ghost-button compact" id="exportJsonButton" type="button">JSON</button>
                     <button class="ghost-button compact" id="exportOcsfButton" type="button">OCSF</button>
                     <button class="ghost-button compact" id="exportCefButton" type="button">CEF</button>

@@ -122,6 +122,9 @@ const AI_DOMAIN_HINTS = [
 ];
 
 const STORAGE_KEYS = {
+  workspaces: "ndrFlowConsole.workspaces.v1",
+  activeWorkspace: "ndrFlowConsole.activeWorkspace.v1",
+  ruleProfile: "ndrFlowConsole.ruleProfile.v1",
   history: "ndrFlowConsole.history.v1",
   baseline: "ndrFlowConsole.baseline.v1",
   hunts: "ndrFlowConsole.hunts.v1",
@@ -150,6 +153,7 @@ const state = {
   errors: [],
   fileName: "",
   enrichment: {},
+  activeWorkspaceId: "",
   selectedEntity: null,
   huntResults: [],
   sort: { field: "start", direction: "desc" },
@@ -177,6 +181,13 @@ function cacheElements() {
     "dropZone",
     "fileInput",
     "fileMeta",
+    "workspaceSelect",
+    "workspaceNameInput",
+    "newWorkspaceButton",
+    "saveWorkspaceButton",
+    "exportPackageButton",
+    "loadDemoButton",
+    "workspaceMeta",
     "pasteInput",
     "analyzeButton",
     "sampleButton",
@@ -197,6 +208,9 @@ function cacheElements() {
     "findingList",
     "severityFilter",
     "exportDetectionsButton",
+    "ruleProfileSelect",
+    "applyRuleProfileButton",
+    "ruleProfileDescription",
     "topRejected",
     "protocolMix",
     "entityCountLabel",
@@ -224,6 +238,9 @@ function cacheElements() {
     "coverageScoreLabel",
     "coverageGrid",
     "sourceNameInput",
+    "sourceTypeInput",
+    "sourceAccountInput",
+    "sourceRegionInput",
     "sourceScopeInput",
     "saveSourceButton",
     "clearSourcesButton",
@@ -261,6 +278,7 @@ function cacheElements() {
     "sampleRateInput",
     "optimizationResult",
     "aiStatusLabel",
+    "aiPromptPreset",
     "aiQuestionInput",
     "askAiButton",
     "summarizeAiButton",
@@ -268,6 +286,7 @@ function cacheElements() {
     "aiAnswerPanel",
     "analystSummary",
     "copySummaryButton",
+    "exportInvestigationPackageButton",
     "exportJsonButton",
     "exportOcsfButton",
     "exportCefButton",
@@ -341,6 +360,11 @@ function wireEvents() {
     els.pasteInput.value = SAMPLE_LOG;
     runAnalysis(SAMPLE_LOG, "Sample log");
   });
+  els.workspaceSelect.addEventListener("change", loadSelectedWorkspace);
+  els.newWorkspaceButton.addEventListener("click", createWorkspaceDraft);
+  els.saveWorkspaceButton.addEventListener("click", saveWorkspaceSnapshot);
+  els.exportPackageButton.addEventListener("click", exportInvestigationPackage);
+  els.loadDemoButton.addEventListener("click", loadGuidedDemo);
 
   els.clearButton.addEventListener("click", () => {
     if (!state.records.length && !els.pasteInput.value.trim()) {
@@ -376,6 +400,8 @@ function wireEvents() {
   els.severityFilter.addEventListener("input", () => {
     renderFindings(state.analysis?.detections || []);
   });
+  els.ruleProfileSelect.addEventListener("change", updateRuleProfileDescription);
+  els.applyRuleProfileButton.addEventListener("click", applyRuleProfile);
 
   els.findingList.addEventListener("click", (event) => {
     const button = event.target.closest("[data-filter-entity]");
@@ -434,6 +460,7 @@ function wireEvents() {
     input.addEventListener("input", renderOptimization);
   });
   els.copySummaryButton.addEventListener("click", copyAnalystSummary);
+  els.exportInvestigationPackageButton.addEventListener("click", exportInvestigationPackage);
   els.exportJsonButton.addEventListener("click", () => exportDetectionsStructured("json"));
   els.exportOcsfButton.addEventListener("click", () => exportDetectionsStructured("ocsf"));
   els.exportCefButton.addEventListener("click", exportDetectionsCef);
@@ -453,6 +480,7 @@ function wireEvents() {
   els.askAiButton.addEventListener("click", () => askBedrockAssistant("answer"));
   els.summarizeAiButton.addEventListener("click", () => askBedrockAssistant("summary"));
   els.clearAiButton.addEventListener("click", clearAiAssistant);
+  els.aiPromptPreset.addEventListener("change", applyAiPromptPreset);
   els.ingestS3Button.addEventListener("click", ingestFromS3);
   els.ingestCloudWatchButton.addEventListener("click", ingestFromCloudWatch);
   els.createJobButton.addEventListener("click", createIngestJob);
@@ -545,6 +573,10 @@ function clearInputMessage() {
 
 async function initializePersistentData() {
   state.enrichment = loadJson(STORAGE_KEYS.enrichment, {});
+  state.activeWorkspaceId = loadJson(STORAGE_KEYS.activeWorkspace, "");
+  els.ruleProfileSelect.value = loadJson(STORAGE_KEYS.ruleProfile, "balanced");
+  updateRuleProfileDescription();
+  renderWorkspaces();
   try {
     [idbApi, backendApi, topologyApi] = await Promise.all([
       import("./src/idb-store.js"),
@@ -583,6 +615,145 @@ function removeJson(key) {
     return;
   }
   localStorage.removeItem(key);
+}
+
+function renderWorkspaces() {
+  const workspaces = loadJson(STORAGE_KEYS.workspaces, []);
+  if (!workspaces.length) {
+    els.workspaceSelect.innerHTML = `<option value="">No saved workspaces</option>`;
+    els.workspaceNameInput.value = "";
+    els.workspaceMeta.textContent = "No workspace saved yet. Analyze evidence, name it, then save.";
+    return;
+  }
+  els.workspaceSelect.innerHTML = workspaces
+    .map((workspace) => `<option value="${escapeHtml(workspace.id)}">${escapeHtml(workspace.name)}</option>`)
+    .join("");
+  const active = workspaces.find((workspace) => workspace.id === state.activeWorkspaceId) || workspaces[0];
+  state.activeWorkspaceId = active.id;
+  saveJson(STORAGE_KEYS.activeWorkspace, active.id);
+  els.workspaceSelect.value = active.id;
+  els.workspaceNameInput.value = active.name;
+  els.workspaceMeta.textContent = `${formatNumber(active.records || 0)} records, ${formatNumber(active.detections || 0)} detections, updated ${formatDate(Date.parse(active.updatedAt || active.createdAt))}`;
+}
+
+function createWorkspaceDraft() {
+  state.activeWorkspaceId = "";
+  saveJson(STORAGE_KEYS.activeWorkspace, "");
+  els.workspaceSelect.value = "";
+  els.workspaceNameInput.value = "";
+  els.workspaceMeta.textContent = "Draft workspace ready. Name it and save after loading evidence.";
+  showToast("New workspace draft started.");
+}
+
+function saveWorkspaceSnapshot() {
+  const name = els.workspaceNameInput.value.trim();
+  if (!name) return setInputMessage("Workspace name is required.");
+  const workspaces = loadJson(STORAGE_KEYS.workspaces, []);
+  const now = new Date().toISOString();
+  const existingIndex = workspaces.findIndex((workspace) => workspace.id === state.activeWorkspaceId || workspace.name.toLowerCase() === name.toLowerCase());
+  const existing = existingIndex >= 0 ? workspaces[existingIndex] : null;
+  const workspace = {
+    id: existing?.id || `workspace-${Date.now()}`,
+    name,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    fileName: state.fileName || "",
+    evidenceText: els.pasteInput.value.slice(0, 200000),
+    records: state.records.length,
+    detections: state.analysis?.detections?.length || 0,
+    high: (state.analysis?.detections || []).filter((detection) => detection.severity === "high").length,
+    entities: state.analysis?.entityRisk?.length || 0,
+    bytes: state.analysis?.totals?.bytes || 0,
+    sourceCount: loadJson(STORAGE_KEYS.sources, []).length,
+    sources: loadJson(STORAGE_KEYS.sources, []),
+    hunts: loadJson(STORAGE_KEYS.hunts, []),
+    enrichment: state.enrichment,
+    ruleProfile: loadJson(STORAGE_KEYS.ruleProfile, "balanced"),
+    signatures: state.analysis ? buildBaselineSignature(state.analysis) : null
+  };
+  if (existingIndex >= 0) workspaces.splice(existingIndex, 1, workspace);
+  else workspaces.unshift(workspace);
+  saveJson(STORAGE_KEYS.workspaces, workspaces.slice(0, 20));
+  state.activeWorkspaceId = workspace.id;
+  saveJson(STORAGE_KEYS.activeWorkspace, workspace.id);
+  renderWorkspaces();
+  showToast(existing ? "Workspace updated." : "Workspace saved.");
+}
+
+function loadSelectedWorkspace() {
+  const workspaces = loadJson(STORAGE_KEYS.workspaces, []);
+  const workspace = workspaces.find((item) => item.id === els.workspaceSelect.value);
+  if (!workspace) return;
+  state.activeWorkspaceId = workspace.id;
+  saveJson(STORAGE_KEYS.activeWorkspace, workspace.id);
+  els.workspaceNameInput.value = workspace.name;
+  els.workspaceMeta.textContent = `${formatNumber(workspace.records || 0)} records, ${formatNumber(workspace.detections || 0)} detections, updated ${formatDate(Date.parse(workspace.updatedAt || workspace.createdAt))}`;
+  if (workspace.sources) saveJson(STORAGE_KEYS.sources, workspace.sources);
+  if (workspace.hunts) saveJson(STORAGE_KEYS.hunts, workspace.hunts);
+  if (workspace.enrichment) {
+    state.enrichment = workspace.enrichment;
+    saveJson(STORAGE_KEYS.enrichment, workspace.enrichment);
+  }
+  if (workspace.ruleProfile) {
+    els.ruleProfileSelect.value = workspace.ruleProfile;
+    saveJson(STORAGE_KEYS.ruleProfile, workspace.ruleProfile);
+    updateRuleProfileDescription();
+  }
+  if (workspace.evidenceText) {
+    els.pasteInput.value = workspace.evidenceText;
+    runAnalysis(workspace.evidenceText, workspace.fileName || workspace.name);
+  } else {
+    renderCoverage();
+    renderSavedHunts();
+  }
+  showToast(`Workspace "${workspace.name}" selected.`);
+}
+
+async function loadGuidedDemo() {
+  els.workspaceNameInput.value = "Demo - Public admin access";
+  els.pasteInput.value = SAMPLE_LOG;
+  saveJson(STORAGE_KEYS.sources, [
+    {
+      id: "demo-prod-vpc",
+      name: "Prod AWS VPC",
+      type: "AWS VPC",
+      account: "123456789012",
+      region: "us-east-1",
+      scope: ["eni-0a1b2c3d", "eni-0e4f5a6b", "eni-0c7d8e9f", "10.0.0.0/16"],
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: "demo-flowlogs",
+      name: "Prod VPC Flow Logs",
+      type: "CloudWatch Log Group",
+      account: "Cloud Platform",
+      region: "us-east-1",
+      scope: ["/aws/vpc/flowlogs/prod", "AWSLogs/123456789012/vpcflowlogs/"],
+      createdAt: new Date().toISOString()
+    }
+  ]);
+  runAnalysis(SAMPLE_LOG, "Guided demo VPC flow evidence");
+  window.setTimeout(async () => {
+    saveWorkspaceSnapshot();
+    if (idbApi?.saveCase && state.analysis?.detections?.[0]) {
+      const detection = state.analysis.detections[0];
+      await idbApi.saveCase({
+        title: `Demo: ${detection.title}`,
+        assignee: "SOC analyst",
+        status: "Triage",
+        severity: detection.severity,
+        notes: `${detection.copy}\n\nResponse guidance: ${detection.response?.[0] || "Review linked evidence."}`,
+        linkedDetection: detection.id,
+        auditAction: "Demo case created",
+        auditDetail: detection.title
+      });
+      await refreshCases();
+    }
+    els.aiPromptPreset.value = "Which entities should I investigate first and why?";
+    applyAiPromptPreset();
+    activateTab("overview");
+    showToast("Guided demo workspace loaded with evidence, sources, and a case.");
+  }, 0);
 }
 
 function showToast(message, tone = "success") {
@@ -655,6 +826,7 @@ function runAnalysis(text, fileName) {
     state.analysis = analyzeRecords(parsed.records, parsed.errors);
     enrichAnalysis(state.analysis);
     applyBaselineObservations(state.analysis);
+    applyDetectionPolicy(state.analysis);
     persistHistory(fileName, state.analysis);
     persistEvidenceIndexedDb(fileName, parsed.records, state.analysis);
 
@@ -1778,7 +1950,7 @@ function renderDashboard() {
 
   els.metricGrid.innerHTML = [
     metricTemplate("NDR risk", String(maxRisk), `${highDetections} high severity`),
-    metricTemplate("Detections", formatNumber(analysis.detections.length), "investigation queue"),
+    metricTemplate("Detections", formatNumber(analysis.detections.length), analysis.policySuppressed ? `${formatNumber(analysis.policySuppressed)} suppressed by policy` : "investigation queue"),
     metricTemplate("Entities", formatNumber(analysis.entityRisk.length), `${formatNumber(analysis.totals.sources.size)} sources`),
     metricTemplate("Rejected", formatNumber(analysis.totals.rejected), formatPercent(rejectRate)),
     metricTemplate("Data volume", formatBytes(analysis.totals.bytes), `${formatNumber(analysis.totals.packets)} packets`)
@@ -2070,6 +2242,11 @@ function renderFindings(findings) {
             ${finding.entity ? `<span class="tag">${escapeHtml(finding.entity)}</span>` : ""}
             ${finding.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}
           </div>
+          <div class="explain-grid">
+            <div><strong>Why it fired</strong><span>${escapeHtml(explainDetection(finding))}</span></div>
+            <div><strong>Evidence basis</strong><span>${escapeHtml(detectionEvidenceText(finding))}</span></div>
+            <div><strong>Confidence</strong><span>${escapeHtml(confidenceLabel(finding.confidence || 0))}</span></div>
+          </div>
           ${finding.response?.length ? `<div class="response-list"><strong>Response:</strong> ${escapeHtml(finding.response[0])}</div>` : ""}
           <div class="evidence-row">
             <span>${escapeHtml(detectionEvidenceText(finding))}</span>
@@ -2079,6 +2256,24 @@ function renderFindings(findings) {
       </article>`
     )
     .join("");
+}
+
+function explainDetection(finding) {
+  const title = `${finding.title || ""} ${finding.technique || ""} ${(finding.tags || []).join(" ")}`.toLowerCase();
+  if (title.includes("beacon")) return "Repeated accepted outbound connections show a regular timing pattern.";
+  if (title.includes("sensitive") || title.includes("admin")) return "Traffic touched a sensitive service or administrative port.";
+  if (title.includes("rejected") || title.includes("probing")) return "Multiple rejected flows suggest scanning, blocked access attempts, or misconfiguration.";
+  if (title.includes("large") || title.includes("transfer")) return "The flow volume is materially higher than normal triage thresholds.";
+  if (title.includes("internal") || title.includes("lateral")) return "Private-to-private access reached services commonly used in lateral movement.";
+  if (title.includes("baseline")) return "The entity, port, application, or path was not present in the saved baseline.";
+  if (title.includes("ai")) return "Enrichment matched known AI-service application or domain hints.";
+  return finding.copy || "The detection rule matched the linked flow evidence.";
+}
+
+function confidenceLabel(confidence) {
+  if (confidence >= 0.75) return "High confidence - strong evidence pattern";
+  if (confidence >= 0.55) return "Medium confidence - validate context";
+  return "Low confidence - treat as an observation";
 }
 
 function detectionEvidenceText(finding) {
@@ -2306,6 +2501,8 @@ function renderCoverage() {
   renderSourceWatchlist(sources);
   const interfaces = new Set(state.records.map((record) => record.interfaceId).filter((value) => value && value !== "-"));
   const expected = new Set(sources.flatMap((source) => source.scope).filter((value) => value.startsWith("eni-")));
+  const managedAccounts = new Set(sources.map((source) => source.account).filter(Boolean));
+  const managedRegions = new Set(sources.map((source) => source.region).filter(Boolean));
   const missing = [...expected].filter((eni) => !interfaces.has(eni));
   const skipData = state.records.filter((record) => record.logStatus === "SKIPDATA").length;
   const noData = state.records.filter((record) => record.logStatus === "NODATA").length;
@@ -2317,7 +2514,7 @@ function renderCoverage() {
     coverageTile("Missing ENIs", formatNumber(missing.length), missing.slice(0, 3).join(", ") || "None"),
     coverageTile("NODATA / SKIPDATA", `${formatNumber(noData)} / ${formatNumber(skipData)}`, "Collector quality"),
     coverageTile("Accounts", formatNumber(uniqueRawValues("account-id").size), "Parsed fields"),
-    coverageTile("Regions", formatNumber(uniqueRawValues("region").size), "Requires custom fields")
+    coverageTile("Managed Sources", formatNumber(sources.length), `${formatNumber(managedAccounts.size)} accounts, ${formatNumber(managedRegions.size)} regions`)
   ].join("");
 }
 
@@ -2338,12 +2535,20 @@ function saveSourceConfig() {
   }
   const invalid = scope.filter((value) => !isValidScopeValue(value));
   if (invalid.length) {
-    setInputMessage(`Invalid source scope: ${invalid.slice(0, 3).join(", ")}. Use ENI IDs, IPv4 CIDRs, or IP addresses.`);
+    setInputMessage(`Invalid source scope: ${invalid.slice(0, 3).join(", ")}. Use ENI IDs, IPv4 CIDRs, IPs, log groups, or S3-style prefixes.`);
     return;
   }
   const sources = loadJson(STORAGE_KEYS.sources, []);
   const existingIndex = sources.findIndex((source) => source.name.toLowerCase() === name.toLowerCase());
-  const item = { id: existingIndex >= 0 ? sources[existingIndex].id : Date.now(), name, scope };
+  const item = {
+    id: existingIndex >= 0 ? sources[existingIndex].id : Date.now(),
+    name,
+    type: els.sourceTypeInput.value,
+    account: els.sourceAccountInput.value.trim(),
+    region: els.sourceRegionInput.value.trim(),
+    scope,
+    createdAt: sources[existingIndex]?.createdAt || new Date().toISOString()
+  };
   if (existingIndex >= 0) {
     sources.splice(existingIndex, 1, item);
   } else {
@@ -2351,13 +2556,15 @@ function saveSourceConfig() {
   }
   saveJson(STORAGE_KEYS.sources, sources.slice(0, 20));
   els.sourceNameInput.value = "";
+  els.sourceAccountInput.value = "";
+  els.sourceRegionInput.value = "";
   els.sourceScopeInput.value = "";
   renderCoverage();
   showToast(existingIndex >= 0 ? "Source watchlist updated." : "Source watchlist saved.");
 }
 
 function isValidScopeValue(value) {
-  return /^eni-[a-z0-9]+$/i.test(value) || /^(\d{1,3}\.){3}\d{1,3}(\/([0-9]|[12][0-9]|3[0-2]))?$/.test(value);
+  return /^eni-[a-z0-9]+$/i.test(value) || /^(\d{1,3}\.){3}\d{1,3}(\/([0-9]|[12][0-9]|3[0-2]))?$/.test(value) || /^\/aws\/[\w/.-]+$/i.test(value) || /^[\w./=-]+\/?$/.test(value);
 }
 
 function renderSourceWatchlist(sources) {
@@ -2369,6 +2576,7 @@ function renderSourceWatchlist(sources) {
     .slice(0, 6)
     .map((source) => `<div class="issue-item">
       <strong>${escapeHtml(source.name)}</strong>
+      <span>${escapeHtml([source.type, source.account, source.region].filter(Boolean).join(" - ") || "Managed source")}</span>
       <span>${escapeHtml(source.scope.join(", "))}</span>
       <button class="mini-button danger inline-action" type="button" data-delete-source="${escapeHtml(source.id)}">Delete</button>
     </div>`)
@@ -2510,6 +2718,47 @@ function applyBaselineObservations(analysis) {
   additions.push(...newSetObservations("New path", [...analysis.internalPaths, ...analysis.externalPaths].map((path) => path.key), baseline.signatures.paths, "Traffic Path"));
   analysis.observations = [...(analysis.observations || []), ...additions].slice(0, 30);
   analysis.findings = [...analysis.detections, ...analysis.observations.filter((item) => !analysis.detections.includes(item))];
+}
+
+function updateRuleProfileDescription() {
+  const profile = els.ruleProfileSelect?.value || "balanced";
+  const descriptions = {
+    strict: "Strict shows every detection and observation for maximum sensitivity.",
+    balanced: "Balanced keeps the default detection mix for day-to-day triage.",
+    focused: "Focused suppresses lower-confidence medium and low items for executive triage."
+  };
+  if (els.ruleProfileDescription) els.ruleProfileDescription.textContent = descriptions[profile] || descriptions.balanced;
+}
+
+function applyRuleProfile() {
+  const profile = els.ruleProfileSelect.value;
+  saveJson(STORAGE_KEYS.ruleProfile, profile);
+  updateRuleProfileDescription();
+  if (state.records.length) {
+    state.analysis = analyzeRecords(state.records, state.errors);
+    enrichAnalysis(state.analysis);
+    applyBaselineObservations(state.analysis);
+    applyDetectionPolicy(state.analysis);
+    applyFilters();
+    renderDashboard();
+  }
+  showToast(`Detection profile set to ${profile}.`);
+}
+
+function applyDetectionPolicy(analysis) {
+  const profile = loadJson(STORAGE_KEYS.ruleProfile, "balanced");
+  analysis.ruleProfile = profile;
+  analysis.policySuppressed = 0;
+  if (profile !== "focused") {
+    analysis.findings = [...analysis.detections, ...(analysis.observations || [])];
+    return;
+  }
+  const before = (analysis.detections || []).length + (analysis.observations || []).length;
+  analysis.detections = (analysis.detections || []).filter((detection) => detection.severity === "high" || (detection.confidence || 0) >= 0.65);
+  analysis.observations = (analysis.observations || []).filter((observation) => (observation.confidence || 0) >= 0.65 && !observation.tags?.includes("Baseline"));
+  analysis.findings = [...analysis.detections, ...analysis.observations];
+  analysis.policySuppressed = Math.max(0, before - analysis.findings.length);
+  analysis.entityRisk = buildEntityRisk(state.records, analysis.detections);
 }
 
 function newSetObservations(title, current, previous = [], tactic) {
@@ -2761,14 +3010,22 @@ async function askBedrockAssistant(mode) {
 
 function clearAiAssistant() {
   els.aiQuestionInput.value = "";
+  els.aiPromptPreset.value = "";
   els.aiAnswerPanel.classList.remove("loading");
   els.aiAnswerPanel.innerHTML = `<div class="empty-state"><strong>No AI response yet</strong><span>Ask a question about the current investigation evidence.</span></div>`;
+}
+
+function applyAiPromptPreset() {
+  if (els.aiPromptPreset.value) {
+    els.aiQuestionInput.value = els.aiPromptPreset.value;
+  }
 }
 
 function buildAiEvidenceContext() {
   const analysis = state.analysis || {};
   return {
     source: state.fileName || "Current browser evidence",
+    workspace: loadJson(STORAGE_KEYS.workspaces, []).find((workspace) => workspace.id === state.activeWorkspaceId)?.name || "",
     generatedAt: new Date().toISOString(),
     metrics: {
       records: state.records.length,
@@ -2819,7 +3076,9 @@ function buildAiEvidenceContext() {
       start: record.start,
       interfaceId: record.interfaceId,
       logStatus: record.logStatus
-    }))
+    })),
+    sources: loadJson(STORAGE_KEYS.sources, []),
+    ruleProfile: analysis.ruleProfile || loadJson(STORAGE_KEYS.ruleProfile, "balanced")
   };
 }
 
@@ -3154,6 +3413,93 @@ function updateStatus() {
 function setStatus(text, className) {
   els.statusPill.className = `status-pill ${className}`;
   els.statusText.textContent = text;
+}
+
+async function exportInvestigationPackage() {
+  if (!state.analysis) {
+    setInputMessage("Analyze evidence before exporting an investigation package.");
+    return;
+  }
+  const cases = idbApi?.listCases ? await idbApi.listCases() : [];
+  const workspaces = loadJson(STORAGE_KEYS.workspaces, []);
+  const workspace = workspaces.find((item) => item.id === state.activeWorkspaceId) || null;
+  const packageBody = {
+    product: "SignalPrism NDR",
+    exportedAt: new Date().toISOString(),
+    workspace: workspace ? packageWorkspace(workspace) : null,
+    source: state.fileName,
+    summary: {
+      records: state.records.length,
+      filteredRecords: state.filtered.length,
+      detections: state.analysis.detections.length,
+      observations: state.analysis.observations?.length || 0,
+      highSeverity: state.analysis.detections.filter((detection) => detection.severity === "high").length,
+      entities: state.analysis.entityRisk.length,
+      bytes: state.analysis.totals.bytes,
+      timeRange: state.analysis.timeRange,
+      ruleProfile: state.analysis.ruleProfile || loadJson(STORAGE_KEYS.ruleProfile, "balanced")
+    },
+    detections: state.analysis.detections.map(packageDetection),
+    observations: (state.analysis.observations || []).map(packageDetection),
+    priorityEntities: state.analysis.entityRisk.slice(0, 25),
+    paths: {
+      internal: state.analysis.internalPaths.slice(0, 25),
+      external: state.analysis.externalPaths.slice(0, 25)
+    },
+    sources: loadJson(STORAGE_KEYS.sources, []),
+    hunts: loadJson(STORAGE_KEYS.hunts, []),
+    cases,
+    analystSummary: els.analystSummary.textContent.trim(),
+    aiAnswer: els.aiAnswerPanel.textContent.trim(),
+    records: state.filtered.slice(0, 500).map((record) => ({
+      source: record.source,
+      destination: record.destination,
+      srcPort: record.srcPort,
+      dstPort: record.dstPort,
+      protocol: record.protocol,
+      action: record.action,
+      packets: record.packets,
+      bytes: record.bytes,
+      start: record.start,
+      end: record.end,
+      interfaceId: record.interfaceId,
+      logStatus: record.logStatus
+    }))
+  };
+  const slug = (workspace?.name || state.fileName || "signalprism-investigation").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+  downloadText(`${slug || "signalprism-investigation"}-package.json`, JSON.stringify(packageBody, null, 2), "application/json");
+  showToast("Investigation package exported.");
+}
+
+function packageDetection(detection) {
+  return {
+    id: detection.id,
+    severity: detection.severity,
+    confidence: detection.confidence,
+    title: detection.title,
+    summary: detection.copy,
+    tactic: detection.tactic,
+    technique: detection.technique,
+    entity: detection.entity,
+    response: detection.response,
+    tags: detection.tags,
+    evidence: (detection.records || []).slice(0, 20).map((record) => ({
+      source: record.source,
+      destination: record.destination,
+      srcPort: record.srcPort,
+      dstPort: record.dstPort,
+      protocol: record.protocol,
+      action: record.action,
+      bytes: record.bytes,
+      start: record.start,
+      interfaceId: record.interfaceId
+    }))
+  };
+}
+
+function packageWorkspace(workspace) {
+  const { evidenceText, ...metadata } = workspace;
+  return metadata;
 }
 
 function exportFilteredCsv() {

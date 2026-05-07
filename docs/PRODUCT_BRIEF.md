@@ -25,19 +25,22 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 1. **Evidence Intake**
    Upload, paste, or ingest logs from S3/CloudWatch, then validate parse quality.
 
-2. **Triage**
+2. **Workspace Setup**
+   Create or load an investigation workspace, run the guided demo, manage source inventory, and save repeatable context.
+
+3. **Triage**
    Review risk metrics, detections, observations, entity risk, ports, protocols, rejects, and traffic over time.
 
-3. **Investigation**
+4. **Investigation**
    Pivot to entity detail, topology, raw records, and saved hunt queries.
 
-4. **Case Management**
+5. **Case Management**
    Create cases, assign owners, override severity, record notes, and view case audit history.
 
-5. **Reporting And Export**
+6. **Reporting And Export**
    Generate analyst summaries, policy recommendations, redacted records, OCSF-like JSON, CEF, CSV, and optional Bedrock summaries.
 
-6. **Continuous Ingest**
+7. **Continuous Ingest**
    Configure protected S3 or CloudWatch ingest jobs and run them manually or on a schedule.
 
 ## Main Screens
@@ -72,6 +75,7 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - `CaseRecord`: title, assignee, status, severity, notes, related detection.
 - `AuditRecord`: append-only actor/action/detail with retention metadata.
 - `IngestJob`: scheduled S3 or CloudWatch import configuration.
+- `Workspace`: local investigation container with evidence snapshot, managed sources, hunts, enrichment, and rule profile.
 
 ## Important Edge Cases
 
@@ -94,11 +98,15 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 ## Done For This Version
 
 - Usable analyst UI across desktop and mobile.
+- Guided demo mode and workspace-backed investigation context.
 - Local upload/paste analysis.
 - S3 and CloudWatch ingest backend with SigV4.
 - Scheduled ingest jobs.
 - IndexedDB evidence/case persistence.
 - Case management and case audit history.
+- Detection explainability and tunable rule profiles.
+- Managed AWS source inventory.
+- Portable investigation package export.
 - OIDC/API-key backend access controls.
 - DynamoDB persistence option.
 - Append-only audit export.

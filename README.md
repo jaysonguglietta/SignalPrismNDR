@@ -15,6 +15,7 @@ SignalPrism NDR is a local and cloud-ready Network Detection and Response consol
 - [Deployment](docs/DEPLOYMENT.md)
 - [Operations Runbook](docs/OPERATIONS_RUNBOOK.md)
 - [Developer Guide](docs/DEVELOPER_GUIDE.md)
+- [Demo Script](docs/DEMO_SCRIPT.md)
 - [Security Notes](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
@@ -93,14 +94,16 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 ## Product workflow
 
 1. Upload, drag/drop, paste, or load the sample flow evidence.
-2. Validate import quality and review parser issues.
-3. Triage the NDR overview for risk, detections, observations, entities, rejects, and data volume.
-4. Investigate detection cards by severity, confidence, tactic, technique, response guidance, and linked evidence.
-5. Pivot into entity risk, entity timeline, internal paths, external paths, or filtered raw records.
-6. Run advanced hunts with fielded queries and save reusable hunts.
-7. Track coverage with expected ENIs/CIDRs, ingest history, and saved baselines.
-8. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
-9. Simulate traffic reduction policies and export detections/records in analyst-friendly formats.
+2. Create or load an investigation workspace, or use the guided demo.
+3. Validate import quality and review parser issues.
+4. Triage the NDR overview for risk, detections, observations, entities, rejects, and data volume.
+5. Investigate detection cards by severity, confidence, tactic, technique, response guidance, linked evidence, and explainability.
+6. Tune the detection profile for strict, balanced, or focused review.
+7. Pivot into entity risk, entity timeline, internal paths, external paths, or filtered raw records.
+8. Run advanced hunts with fielded queries and save reusable hunts.
+9. Track managed sources, coverage, ingest history, and saved baselines.
+10. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
+11. Simulate traffic reduction policies and export detections, records, and full investigation packages.
 
 ## Supported input
 
@@ -151,8 +154,13 @@ All analysis runs in the browser. Uploaded log contents are not sent to a server
 - DynamoDB persistence option for jobs, runs, and audit records.
 - Append-only audit export with retention metadata and Terraform Object Lock retention.
 - Feature-flagged AWS Bedrock assistant for natural-language investigation questions and AI-generated summaries.
+- Bedrock prompt presets for top risk, executive summary, attack path, containment, evidence gaps, and SIEM query ideas.
 - IndexedDB evidence and case persistence.
+- Local investigation workspaces with guided demo mode.
 - Case queue with status, severity override, assignee, notes, and audit log.
+- Detection explainability, confidence interpretation, and tunable rule profiles.
+- Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, and prefixes.
+- Portable investigation package export.
 - Visual topology map with time replay slider.
 
 ## Data model

@@ -105,6 +105,26 @@ Entity risk combines:
 
 The score is intended for triage order, not as a standalone severity.
 
+## Detection Explainability
+
+Detection cards include three explanation fields:
+
+- `Why it fired`: a concise interpretation of the rule condition.
+- `Evidence basis`: linked record count and time range.
+- `Confidence`: high, medium, or low confidence guidance.
+
+These explanations are deterministic and generated locally from detection metadata and linked evidence.
+
+## Rule Profiles
+
+SignalPrism supports local rule tuning profiles:
+
+- `Strict`: maximum sensitivity, keeps all detections and observations.
+- `Balanced`: default day-to-day triage.
+- `Focused`: suppresses lower-confidence medium and low items for executive or high-noise review.
+
+The active profile is stored locally, reflected in metrics, included in AI context, and exported in investigation packages.
+
 ## Path Ranking
 
 Paths are ranked by bytes, packets, and frequency. Internal and external paths are shown separately to help analysts distinguish lateral movement from egress.
@@ -135,6 +155,7 @@ Enrichment is stored locally in browser storage.
 - OCSF-like JSON for SIEM-oriented downstream use.
 - CEF for legacy SIEM ingestion.
 - Redacted JSON for privacy-aware sharing.
+- Investigation package JSON for complete local case handoff.
 - Backend audit NDJSON.
 
 ## Analyst Guidance

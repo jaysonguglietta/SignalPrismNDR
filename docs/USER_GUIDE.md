@@ -12,6 +12,38 @@ Open `http://localhost:4173`.
 
 For file-only local analysis, open `index.html` directly in a browser. Cloud ingest, jobs, SSO, audit export, and Bedrock require the backend.
 
+## Guided Demo
+
+Select `Demo` in the `Investigation` panel to load a complete sample investigation. The demo:
+
+- Loads realistic VPC flow evidence.
+- Saves a demo workspace.
+- Adds managed AWS sources.
+- Runs the analysis.
+- Creates a starter case from the top detection.
+- Selects a useful Bedrock prompt preset.
+
+Use this when evaluating the product or presenting it to stakeholders.
+
+## Investigation Workspaces
+
+The `Investigation` panel stores repeatable local workspaces. A workspace can retain:
+
+- Name and source file label.
+- Evidence text snapshot.
+- Detection counts and risk summary.
+- Managed source inventory.
+- Saved hunts.
+- Enrichment.
+- Rule profile.
+
+Controls:
+
+- `New`: starts a draft workspace.
+- `Save`: stores or updates the current workspace.
+- `Package`: exports the current investigation package.
+- Workspace selector: restores saved workspace metadata and evidence when available.
+
 ## Load Evidence
 
 Use one of these intake paths:
@@ -48,8 +80,23 @@ Open `Detections` to filter by severity and review:
 - Affected entity.
 - Response guidance.
 - Linked evidence.
+- Why the detection fired.
+- Evidence basis.
+- Confidence interpretation.
 
 Use `Create Case` from a high-value detection when an item needs tracking.
+
+## Tune Detection Policy
+
+Open `Detections > Detection policy`.
+
+Profiles:
+
+- `Strict`: shows every detection and observation for maximum sensitivity.
+- `Balanced`: default triage mix.
+- `Focused`: suppresses lower-confidence medium and low items for executive triage.
+
+Rule profile changes are stored locally and included in investigation packages.
 
 ## Pivot Through Entities
 
@@ -88,12 +135,14 @@ Save repeatable hunts for later runs. Saved hunts persist locally in the browser
 
 Open `Coverage` to track:
 
-- Expected source watchlist.
+- Managed source inventory.
 - Observed versus expected ENIs/CIDRs.
 - Ingest history.
 - Saved baseline drift.
 
 Use baselines to catch new entities, destination ports, applications, and paths.
+
+Managed sources can include source type, account or owner, region, expected ENIs, CIDRs, CloudWatch log groups, and S3 prefixes.
 
 ## Enrichment
 
@@ -174,6 +223,15 @@ When Bedrock is enabled, use the AI assistant to ask questions such as:
 - `What evidence supports the highest severity detection?`
 - `What should I validate before escalating this case?`
 
+Use presets for common workflows:
+
+- Top risk explanation.
+- Executive summary.
+- Attack path.
+- Containment plan.
+- Evidence gaps.
+- SIEM query ideas.
+
 The assistant sends a bounded investigation context through the backend, not the entire raw upload.
 
 ## Export
@@ -186,5 +244,8 @@ Supported exports:
 - CEF.
 - Redacted evidence JSON.
 - Append-only backend audit NDJSON.
+- Investigation package JSON.
 
 Use redacted exports when sharing evidence outside the security team.
+
+The investigation package includes workspace metadata, summary counts, detections, observations, top entities, topology paths, managed sources, saved hunts, cases, summaries, AI answer text, and a bounded record sample.

@@ -107,6 +107,8 @@ Example response:
 
 Protected. Requires `admin`, `analyst`, or `viewer`. Requires `NDR_BEDROCK_ENABLED=true`.
 
+The browser builds a bounded investigation context. It can include workspace name, managed sources, active rule profile, summary metrics, detections, priority entities, paths, and a sample of filtered records.
+
 Request:
 
 ```json

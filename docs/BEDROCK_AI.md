@@ -55,6 +55,7 @@ The assistant does not automatically send the entire raw upload. It sends a boun
 
 Context includes:
 
+- Workspace name.
 - Source label.
 - Generated timestamp.
 - Counts and volume metrics.
@@ -64,8 +65,21 @@ Context includes:
 - Top applications and ports.
 - Internal and external paths.
 - Sample filtered records.
+- Managed sources.
+- Active rule profile.
 
 ## Recommended Prompts
+
+Built-in presets:
+
+- Top risk explanation.
+- Executive summary.
+- Attack path.
+- Containment plan.
+- Evidence gaps.
+- SIEM query ideas.
+
+Custom examples:
 
 - `Which entities should I investigate first and why?`
 - `Summarize the likely attack path in this evidence.`

@@ -14,6 +14,7 @@ SignalPrism NDR is a cloud-ready Network Detection and Response workbench for AW
 - [Deployment](DEPLOYMENT.md): local, Docker, and AWS ECS/Fargate deployment flows.
 - [Operations Runbook](OPERATIONS_RUNBOOK.md): health checks, metrics, incidents, backups, and maintenance.
 - [Developer Guide](DEVELOPER_GUIDE.md): repository layout, scripts, testing, coding conventions, and release workflow.
+- [Demo Script](DEMO_SCRIPT.md): guided walkthrough for evaluators, clients, and stakeholders.
 
 Additional top-level docs:
 

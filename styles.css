@@ -356,6 +356,10 @@ select {
   line-height: 1.4;
 }
 
+.workspace-card .button-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .primary-button,
 .ghost-button,
 .link-button,
@@ -837,6 +841,37 @@ select {
   gap: 6px;
 }
 
+.explain-grid {
+  margin: 10px 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.explain-grid div {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.explain-grid strong,
+.explain-grid span {
+  display: block;
+}
+
+.explain-grid strong {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.explain-grid span {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .response-list {
   margin: 9px 0 0;
   padding: 9px 10px;
@@ -1198,6 +1233,10 @@ td.mono {
   }
 
   .ai-assistant {
+    grid-template-columns: 1fr;
+  }
+
+  .explain-grid {
     grid-template-columns: 1fr;
   }
 

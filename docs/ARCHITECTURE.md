@@ -61,6 +61,7 @@ The backend signs AWS requests directly with SigV4. Local credentials use `AWS_A
 
 Browser persistence:
 
+- Local workspaces store investigation metadata, optional evidence snapshots, managed sources, hunts, enrichment, and active rule profile.
 - IndexedDB stores evidence runs, case records, and case audit history.
 - LocalStorage stores preferences, enrichment, hunts, baselines, API key, and OIDC token metadata.
 
@@ -137,3 +138,4 @@ sequenceDiagram
 - Large evidence sets are bounded for browser performance.
 - Bedrock answers are advisory and must be validated against source evidence.
 - Terraform assumes an existing VPC and subnets.
+- Workspace restore is local-browser persistence, not shared multi-user case storage.

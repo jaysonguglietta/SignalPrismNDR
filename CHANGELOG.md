@@ -2,6 +2,19 @@
 
 All notable changes to SignalPrism NDR are tracked here.
 
+## Unreleased
+
+### Added
+
+- Local investigation workspaces with evidence snapshot restore.
+- Guided demo mode with sample evidence, managed sources, prompt preset, and starter case.
+- Detection explainability blocks for why it fired, evidence basis, and confidence interpretation.
+- Detection policy profiles for strict, balanced, and focused triage.
+- Managed source inventory fields for source type, account/owner, region, ENIs, CIDRs, log groups, and prefixes.
+- Bedrock assistant prompt presets.
+- Portable investigation package export.
+- Demo script documentation.
+
 ## 0.2.0 - 2026-05-05
 
 ### Added
