@@ -117,17 +117,21 @@ These explanations are deterministic and generated locally from detection metada
 
 ## Rule Profiles
 
-SignalPrism supports local rule tuning profiles:
+SignalPrism supports rule tuning profiles:
 
 - `Strict`: maximum sensitivity, keeps all detections and observations.
 - `Balanced`: default day-to-day triage.
 - `Focused`: suppresses lower-confidence medium and low items for executive or high-noise review.
 
-The active profile is stored locally, reflected in metrics, included in AI context, and exported in investigation packages.
+The active profile is reflected in metrics, saved with workspaces, included in AI context, and exported in investigation packages.
 
 ## Path Ranking
 
 Paths are ranked by bytes, packets, and frequency. Internal and external paths are shown separately to help analysts distinguish lateral movement from egress.
+
+## Topology Replay
+
+Topology replay uses normalized record timestamps to build a cutoff view of entity-to-entity paths. The scrubber, play control, and step controls all use the same deterministic replay snapshot: included records, cutoff time, and recent-event trail.
 
 ## Enrichment Model
 
@@ -146,7 +150,7 @@ Accepted enrichment fields:
 - `category`
 - `ai`
 
-Enrichment is stored locally in browser storage.
+Enrichment is stored in browser storage and can be included in tenant workspace snapshots.
 
 ## Export Formats
 
@@ -155,7 +159,7 @@ Enrichment is stored locally in browser storage.
 - OCSF-like JSON for SIEM-oriented downstream use.
 - CEF for legacy SIEM ingestion.
 - Redacted JSON for privacy-aware sharing.
-- Investigation package JSON for complete local case handoff.
+- Investigation package JSON for complete case handoff. Backend-enabled exports are RBAC-controlled and audited.
 - Backend audit NDJSON.
 
 ## Analyst Guidance

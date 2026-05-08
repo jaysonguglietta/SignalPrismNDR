@@ -133,11 +133,15 @@ Back up `NDR_DATA_DIR`:
 
 - `jobs.json`
 - `ingest-runs.json`
+- `workspaces.json`
+- `cases.json`
+- `evidence-runs.json`
+- `sources.json`
 - `audit.ndjson`
 
 ### DynamoDB Mode
 
-Terraform enables point-in-time recovery. Confirm backups and retention with account policy.
+Terraform enables point-in-time recovery. Confirm backups and retention with account policy. Tenant-scoped workspaces, cases, evidence runs, and managed sources use `TENANT#<tenantId>#<kind>` partition keys.
 
 ### Audit Exports
 

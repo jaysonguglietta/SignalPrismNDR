@@ -22,8 +22,10 @@ Protected endpoints require one of:
 ## Roles
 
 - `admin`: all protected endpoints.
-- `analyst`: ingest, create jobs, run jobs, read jobs/runs, AI assistant.
-- `viewer`: read jobs/runs and use AI assistant.
+- `analyst`: save tenant workspaces, cases, evidence runs, sources, ingest, create jobs, run jobs, export investigations, and use the AI assistant.
+- `viewer`: read tenant workspaces, cases, evidence runs, sources, jobs, and runs.
+
+Tenant isolation uses `principal.tenantId`. OIDC tenants come from `NDR_TENANT_CLAIM` with fallback claims. API key and local-dev sessions use `NDR_DEFAULT_TENANT`.
 
 ## Operational Endpoints
 
@@ -105,7 +107,7 @@ Example response:
 
 ### `POST /api/ai/ask`
 
-Protected. Requires `admin`, `analyst`, or `viewer`. Requires `NDR_BEDROCK_ENABLED=true`.
+Protected. Requires `admin` or `analyst`. Requires `NDR_BEDROCK_ENABLED=true`.
 
 The browser builds a bounded investigation context. It can include workspace name, managed sources, active rule profile, summary metrics, detections, priority entities, paths, and a sample of filtered records.
 
@@ -137,6 +139,68 @@ Response:
   "usage": {}
 }
 ```
+
+## Workspace, Evidence, Source, Case, And Export Endpoints
+
+### `GET /api/workspaces`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns tenant workspaces.
+
+### `POST /api/workspaces`
+
+Protected. Requires `admin` or `analyst`. Saves a tenant workspace snapshot.
+
+### `DELETE /api/workspaces/{id}`
+
+Protected. Requires `admin`.
+
+### `GET /api/evidence-runs`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns bounded evidence run metadata.
+
+### `POST /api/evidence-runs`
+
+Protected. Requires `admin` or `analyst`. Stores evidence-run metadata, detection summary, and a bounded record sample.
+
+### `GET /api/sources`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns managed source inventory.
+
+### `POST /api/sources`
+
+Protected. Requires `admin` or `analyst`. Saves a managed AWS source.
+
+### `POST /api/sources/{id}/ingest`
+
+Protected. Requires `admin` or `analyst`. Infers CloudWatch or S3 ingest from the managed source scope and imports evidence.
+
+### `POST /api/sources/{id}/jobs`
+
+Protected. Requires `admin` or `analyst`. Creates a scheduled ingest job from a managed source.
+
+### `DELETE /api/sources/{id}`
+
+Protected. Requires `admin`.
+
+### `GET /api/cases`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns tenant cases.
+
+### `POST /api/cases`
+
+Protected. Requires `admin` or `analyst`. Creates or updates a case and appends case audit history.
+
+### `GET /api/cases/{id}/audit`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns a case audit trail.
+
+### `DELETE /api/cases/{id}`
+
+Protected. Requires `admin`.
+
+### `POST /api/exports/investigation`
+
+Protected. Requires `admin` or `analyst`. Stamps tenant/export metadata and writes an audit event before the browser downloads the package.
 
 ## Ingest Endpoints
 

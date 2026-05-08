@@ -18,6 +18,66 @@ export async function askAi(payload) {
   return apiPost("/api/ai/ask", payload);
 }
 
+export async function listWorkspaces() {
+  return apiGet("/api/workspaces");
+}
+
+export async function saveWorkspace(workspace) {
+  return apiPost("/api/workspaces", workspace);
+}
+
+export async function deleteWorkspace(id) {
+  return apiDelete(`/api/workspaces/${encodeURIComponent(id)}`);
+}
+
+export async function listEvidenceRuns() {
+  return apiGet("/api/evidence-runs");
+}
+
+export async function saveEvidenceRun(run) {
+  return apiPost("/api/evidence-runs", run);
+}
+
+export async function listSources() {
+  return apiGet("/api/sources");
+}
+
+export async function saveSource(source) {
+  return apiPost("/api/sources", source);
+}
+
+export async function deleteSource(id) {
+  return apiDelete(`/api/sources/${encodeURIComponent(id)}`);
+}
+
+export async function ingestManagedSource(id) {
+  return apiPost(`/api/sources/${encodeURIComponent(id)}/ingest`, {});
+}
+
+export async function scheduleManagedSource(id, job) {
+  return apiPost(`/api/sources/${encodeURIComponent(id)}/jobs`, job);
+}
+
+export async function listCases() {
+  return apiGet("/api/cases");
+}
+
+export async function saveCase(caseRecord) {
+  return apiPost("/api/cases", caseRecord);
+}
+
+export async function deleteCase(id) {
+  return apiDelete(`/api/cases/${encodeURIComponent(id)}`);
+}
+
+export async function listCaseAudit(id) {
+  return apiGet(`/api/cases/${encodeURIComponent(id)}/audit`);
+}
+
+export async function exportInvestigationPackage(payload) {
+  return apiPost("/api/exports/investigation", payload);
+}
+
 export async function ingestS3(config) {
   return apiPost("/api/ingest/s3", config);
 }
@@ -39,9 +99,7 @@ export async function runJob(id) {
 }
 
 export async function deleteJob(id) {
-  const response = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
-  if (!response.ok) throw new Error(await response.text());
-  return response.json();
+  return apiDelete(`/api/jobs/${encodeURIComponent(id)}`);
 }
 
 export async function listBackendRuns() {
@@ -136,6 +194,12 @@ async function apiPost(path, body) {
     headers: { "content-type": "application/json", ...authHeaders() },
     body: JSON.stringify(body)
   });
+  if (!response.ok) throw new Error(await errorText(response));
+  return response.json();
+}
+
+async function apiDelete(path) {
+  const response = await fetch(path, { method: "DELETE", headers: authHeaders() });
   if (!response.ok) throw new Error(await errorText(response));
   return response.json();
 }

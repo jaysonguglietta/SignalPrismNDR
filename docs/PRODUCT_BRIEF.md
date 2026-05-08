@@ -26,7 +26,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
    Upload, paste, or ingest logs from S3/CloudWatch, then validate parse quality.
 
 2. **Workspace Setup**
-   Create or load an investigation workspace, run the guided demo, manage source inventory, and save repeatable context.
+   Create or load a tenant-backed investigation workspace, run the guided demo, manage source inventory, and save repeatable context.
 
 3. **Triage**
    Review risk metrics, detections, observations, entity risk, ports, protocols, rejects, and traffic over time.
@@ -41,7 +41,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
    Generate analyst summaries, policy recommendations, redacted records, OCSF-like JSON, CEF, CSV, and optional Bedrock summaries.
 
 7. **Continuous Ingest**
-   Configure protected S3 or CloudWatch ingest jobs and run them manually or on a schedule.
+   Configure protected S3 or CloudWatch ingest jobs from either the pipeline form or managed source inventory, then run them manually or on a schedule.
 
 ## Main Screens
 
@@ -53,14 +53,14 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 - **Coverage**: expected source coverage, blind spots, history, and baselines.
 - **Pipeline**: enrichment, cloud ingest, scheduled jobs, application intelligence, traffic optimization.
 - **Cases**: case intake, queue, notes, severity override, and audit log.
-- **Topology**: entity-to-entity path map with replay slider.
+- **Topology**: entity-to-entity path map with playable replay, step controls, scrubber, and recent-event trail.
 - **Reports**: Bedrock assistant, analyst summary, policy recommendations, and privacy exports.
 
 ## User Roles
 
-- `admin`: full backend access, job deletion, audit export, ingest, and AI assistant.
-- `analyst`: ingest, scheduled job creation, job execution, read access, and AI assistant.
-- `viewer`: read access and AI assistant, without mutating ingest schedules.
+- `admin`: full tenant access, destructive deletes, audit export, ingest, controlled exports, and AI assistant.
+- `analyst`: create/update workspaces, cases, sources, evidence runs, ingest, scheduled job creation, job execution, controlled exports, and AI assistant.
+- `viewer`: tenant read access without mutating cases, sources, exports, AI, or ingest schedules.
 
 Local development runs as `local-dev` admin when neither API key nor OIDC is configured.
 
@@ -71,11 +71,12 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - `EntityRisk`: ranked entity score with peers, ports, rejects, bytes, packets, and linked findings.
 - `Path`: ranked source-to-destination path.
 - `Hunt`: saved query and result history.
-- `CoverageSource`: expected ENI/CIDR/source metadata.
-- `CaseRecord`: title, assignee, status, severity, notes, related detection.
+- `CoverageSource`: tenant-managed source type, account, region, ENI/CIDR/log group/S3 scope, and inferred ingest target.
+- `CaseRecord`: tenant, title, assignee, status, severity, notes, related detection, and audit trail.
+- `EvidenceRun`: tenant, file/source label, count summary, detection summary, and bounded record sample.
 - `AuditRecord`: append-only actor/action/detail with retention metadata.
 - `IngestJob`: scheduled S3 or CloudWatch import configuration.
-- `Workspace`: local investigation container with evidence snapshot, managed sources, hunts, enrichment, and rule profile.
+- `Workspace`: tenant investigation container with evidence snapshot, managed sources, hunts, enrichment, and rule profile.
 
 ## Important Edge Cases
 
@@ -84,6 +85,8 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Large evidence sets that should stay bounded in browser memory.
 - Missing AWS credentials, disabled Bedrock, or insufficient IAM permissions.
 - Expired OIDC tokens or unmapped identity-provider groups.
+- Tenant claim missing or changed between identity providers.
+- Viewer attempts to export, invoke AI, or mutate cases.
 - Scheduled jobs that fail because source buckets/log groups change.
 - Audit export and retention expectations in regulated environments.
 
@@ -92,7 +95,7 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - AWS is the first-class cloud provider.
 - Browser-side analysis is acceptable for the first production-shaped version.
 - Shared deployments run privately behind HTTPS with API key or OIDC.
-- DynamoDB is the preferred cloud persistence option for jobs, runs, and audit records.
+- DynamoDB is the preferred cloud persistence option for tenant workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
 - Bedrock is opt-in and disabled by default.
 
 ## Done For This Version
@@ -102,14 +105,15 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Local upload/paste analysis.
 - S3 and CloudWatch ingest backend with SigV4.
 - Scheduled ingest jobs.
-- IndexedDB evidence/case persistence.
+- Tenant-backed workspace, evidence, source, and case persistence with IndexedDB/local fallback.
 - Case management and case audit history.
 - Detection explainability and tunable rule profiles.
-- Managed AWS source inventory.
-- Portable investigation package export.
+- Managed AWS source inventory with direct ingest and schedule creation.
+- RBAC-controlled portable investigation package export.
+- Playable topology replay with timeline scrubbing.
 - OIDC/API-key backend access controls.
 - DynamoDB persistence option.
 - Append-only audit export.
 - Bedrock feature flag and AI assistant.
 - ECS/Fargate Terraform production path.
-- Smoke and integration checks.
+- Smoke, integration, and UI workflow checks.

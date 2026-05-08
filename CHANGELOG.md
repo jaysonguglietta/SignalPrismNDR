@@ -14,6 +14,11 @@ All notable changes to SignalPrism NDR are tracked here.
 - Bedrock assistant prompt presets.
 - Portable investigation package export.
 - Demo script documentation.
+- Tenant-scoped backend persistence for workspaces, cases, evidence runs, and managed sources with DynamoDB/local adapters.
+- Tenant-aware RBAC for cases, investigation package exports, and Bedrock AI actions.
+- Managed source inventory actions for direct CloudWatch/S3 ingest and scheduled job creation.
+- Playable topology replay with step controls and a recent-event trail.
+- Automated UI workflow checks for upload/demo, rule tuning, AI context, export, and replay flows.
 
 ## 0.2.0 - 2026-05-05
 

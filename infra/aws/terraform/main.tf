@@ -457,6 +457,8 @@ resource "aws_ecs_task_definition" "app" {
         { name = "NDR_ADMIN_GROUP", value = var.admin_group },
         { name = "NDR_ANALYST_GROUP", value = var.analyst_group },
         { name = "NDR_VIEWER_GROUP", value = var.viewer_group },
+        { name = "NDR_DEFAULT_TENANT", value = var.default_tenant },
+        { name = "NDR_TENANT_CLAIM", value = var.tenant_claim },
         { name = "NDR_BEDROCK_ENABLED", value = tostring(var.bedrock_enabled) },
         { name = "NDR_BEDROCK_REGION", value = var.bedrock_region },
         { name = "NDR_BEDROCK_MODEL_ID", value = var.bedrock_model_id },

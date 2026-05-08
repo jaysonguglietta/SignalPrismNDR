@@ -1,17 +1,17 @@
 # Architecture
 
-SignalPrism NDR is intentionally simple: a dependency-free browser application plus a small Node backend for protected cloud operations. The browser owns evidence parsing and investigation state. The backend owns AWS signing, authentication, scheduled ingest jobs, audit export, and optional Bedrock calls.
+SignalPrism NDR is intentionally simple: a dependency-free browser application plus a small Node backend for protected cloud operations. The browser owns evidence parsing and detection execution. The backend owns AWS signing, authentication, tenant-scoped persistence, scheduled ingest jobs, controlled exports, audit export, and optional Bedrock calls.
 
 ## System Context
 
 ```mermaid
 flowchart LR
   Analyst["Analyst Browser"] --> UI["SignalPrism NDR UI"]
-  UI --> IDB["IndexedDB<br>Evidence, cases, hunts"]
+  UI --> IDB["IndexedDB<br>offline fallback"]
   UI --> API["Node Backend"]
   API --> S3["Amazon S3<br>VPC Flow Logs"]
   API --> CW["CloudWatch Logs"]
-  API --> DDB["DynamoDB<br>jobs, runs, audit"]
+  API --> DDB["DynamoDB<br>tenant store"]
   API --> BR["Amazon Bedrock Runtime"]
   API --> Audit["S3 Object Lock<br>audit exports"]
   API --> OIDC["OIDC Provider"]
@@ -44,8 +44,9 @@ Responsibilities:
 - API key and OIDC JWT authorization.
 - S3 and CloudWatch ingest with AWS SigV4.
 - Scheduled job management.
-- Local JSON or DynamoDB persistence.
+- Tenant-scoped local JSON or DynamoDB persistence for workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
 - Append-only audit records and export.
+- RBAC-controlled investigation package export.
 - Bedrock Converse API requests when feature-flagged.
 - Health, readiness, and Prometheus-style metrics.
 
@@ -61,14 +62,16 @@ The backend signs AWS requests directly with SigV4. Local credentials use `AWS_A
 
 Browser persistence:
 
-- Local workspaces store investigation metadata, optional evidence snapshots, managed sources, hunts, enrichment, and active rule profile.
-- IndexedDB stores evidence runs, case records, and case audit history.
+- Local workspaces, sources, evidence runs, and cases are used as offline fallback when the backend is unavailable.
+- IndexedDB stores evidence runs, case records, and case audit history for local-only use.
 - LocalStorage stores preferences, enrichment, hunts, baselines, API key, and OIDC token metadata.
 
 Backend persistence:
 
 - `NDR_STORE=local`: JSON/NDJSON files under `NDR_DATA_DIR`.
 - `NDR_STORE=dynamodb`: single-table DynamoDB with `pk`, `sk`, `createdAt`, and serialized `payload`.
+- Tenant-scoped records use partition keys shaped as `TENANT#<tenantId>#<kind>` for `WORKSPACE`, `CASE`, `EVIDENCE`, and `SOURCE`.
+- Jobs, runs, and audit records include `tenantId` and are filtered by the resolved principal tenant.
 
 ## Authentication And Authorization
 
@@ -83,6 +86,18 @@ Role mapping:
 - `NDR_ADMIN_GROUP` -> `admin`
 - `NDR_ANALYST_GROUP` -> `analyst`
 - `NDR_VIEWER_GROUP` -> `viewer`
+
+Tenant mapping:
+
+- `NDR_TENANT_CLAIM` selects the OIDC claim used as `tenantId`.
+- Fallback claims include `tenant_id`, `org_id`, `organization`, and `custom:tenant_id`.
+- API key and local-dev sessions use `NDR_DEFAULT_TENANT`.
+
+Authorization boundaries:
+
+- `admin`: full tenant access, destructive deletes, audit export.
+- `analyst`: create/update tenant workspaces, cases, sources, evidence runs, ingest jobs, AI actions, and investigation exports.
+- `viewer`: read-only tenant inspection. AI and exports are blocked.
 
 ## Deployment Architecture
 
@@ -111,6 +126,10 @@ sequenceDiagram
 
   B->>B: Parse uploaded/pasted logs
   B->>B: Generate detections and entity risk
+  B->>A: POST /api/evidence-runs
+  A->>D: Store tenant evidence metadata/sample
+  B->>A: POST /api/workspaces or /api/cases
+  A->>D: Store tenant investigation state
   B->>A: POST /api/ingest/s3 or /api/ingest/cloudwatch
   A->>S: Signed AWS request
   S-->>A: Flow log text
@@ -127,6 +146,7 @@ sequenceDiagram
 
 - Keep raw evidence local by default.
 - Use the backend only for privileged operations.
+- Enforce tenant boundaries server-side for shared workspaces, cases, sources, evidence metadata, exports, and AI actions.
 - Prefer clear data models and replaceable storage boundaries.
 - Keep AWS credentials out of the browser.
 - Keep AI opt-in, bounded, and auditable.
@@ -138,4 +158,4 @@ sequenceDiagram
 - Large evidence sets are bounded for browser performance.
 - Bedrock answers are advisory and must be validated against source evidence.
 - Terraform assumes an existing VPC and subnets.
-- Workspace restore is local-browser persistence, not shared multi-user case storage.
+- Full raw evidence archive storage still needs an object-store design for very large investigations; the current tenant evidence store keeps bounded samples and metadata.

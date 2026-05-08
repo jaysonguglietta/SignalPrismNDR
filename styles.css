@@ -428,6 +428,13 @@ select {
   color: var(--red);
 }
 
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
@@ -969,6 +976,20 @@ select {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfbf8;
+}
+
+.replay-controls {
+  border-top: 1px solid var(--line);
+}
+
+.replay-controls .button-row {
+  margin-top: 10px;
+}
+
+.replay-events {
+  margin-top: 12px;
+  max-height: 260px;
+  overflow: auto;
 }
 
 .detail-tile,

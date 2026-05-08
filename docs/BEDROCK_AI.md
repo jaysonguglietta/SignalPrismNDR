@@ -44,7 +44,7 @@ Variables:
 1. Analyst loads and analyzes evidence in the browser.
 2. Browser builds a bounded investigation context containing metrics, top detections, priority entities, paths, application mix, ports, and sample records.
 3. Browser sends the context and question to `POST /api/ai/ask`.
-4. Backend checks role access.
+4. Backend checks tenant and role access. AI requires `admin` or `analyst`.
 5. Backend signs a Bedrock Runtime Converse API request with SigV4.
 6. Backend returns the generated answer or summary.
 7. Backend appends an audit record for the AI invocation.
@@ -93,6 +93,7 @@ Custom examples:
 - Disabled by default.
 - Server-side signing keeps AWS credentials out of the browser.
 - Backend role checks apply.
+- Viewer sessions cannot invoke AI.
 - Requests are rate limited with the rest of the API.
 - AI invocations are audited.
 - Context is truncated.

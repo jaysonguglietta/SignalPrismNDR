@@ -10,6 +10,7 @@
 ├── server.mjs
 ├── smoke-test.js
 ├── integration-test.mjs
+├── ui-flow-test.mjs
 ├── scripts/
 │   └── build.mjs
 ├── src/
@@ -42,13 +43,19 @@ Runs parser and detection smoke tests.
 npm run integration
 ```
 
-Starts temporary backend instances and verifies API auth, rate limiting, AI disabled behavior, and SigV4 signing.
+Starts temporary backend instances and verifies API auth, tenant-scoped RBAC, tenant isolation, rate limiting, AI disabled behavior, controlled exports, and SigV4 signing.
+
+```bash
+npm run ui:test
+```
+
+Runs no-dependency UI workflow checks for upload/demo analysis, rule tuning, AI context shaping, investigation package export, and topology replay helpers.
 
 ```bash
 npm run check
 ```
 
-Runs syntax checks, smoke tests, and integration tests.
+Runs syntax checks, smoke tests, integration tests, and UI workflow checks.
 
 ```bash
 npm run build
@@ -80,6 +87,7 @@ Copies the dependency-free app into `dist/`.
 - Cases.
 - Exports.
 - AI evidence context shaping.
+- Pure testable helpers for detection tuning, AI context, investigation packages, and topology replay state.
 
 The next major frontend architecture step is to introduce a build step and split `app.js` into modules by domain.
 
@@ -91,6 +99,7 @@ The next major frontend architecture step is to introduce a build step and split
 - Static serving.
 - Auth and RBAC.
 - Storage adapters.
+- Tenant isolation.
 - AWS API calls.
 - Rate limiting.
 - Metrics.
@@ -113,9 +122,19 @@ Integration tests validate:
 - Public health access.
 - Protected API auth.
 - API key behavior.
+- Tenant-scoped cases, workspaces, evidence runs, sources, and exports.
+- Viewer write/export/AI restrictions.
 - Disabled Bedrock endpoint behavior.
 - Rate limiting.
 - SigV4 signer shape.
+
+UI flow tests validate:
+
+- Upload/demo evidence analysis.
+- Detection profile tuning.
+- AI summary context content.
+- Investigation package shape and evidence caps.
+- Topology replay timeline state.
 
 ## CI
 

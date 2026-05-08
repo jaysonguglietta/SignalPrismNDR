@@ -12,6 +12,10 @@ const ROOT = resolve(".");
 const DATA_DIR = resolve(process.env.NDR_DATA_DIR || join(ROOT, ".ndr-data"));
 const JOBS_FILE = join(DATA_DIR, "jobs.json");
 const RUNS_FILE = join(DATA_DIR, "ingest-runs.json");
+const WORKSPACES_FILE = join(DATA_DIR, "workspaces.json");
+const CASES_FILE = join(DATA_DIR, "cases.json");
+const EVIDENCE_FILE = join(DATA_DIR, "evidence-runs.json");
+const SOURCES_FILE = join(DATA_DIR, "sources.json");
 const AUDIT_FILE = join(DATA_DIR, "audit.ndjson");
 const MAX_BODY_BYTES = Number(process.env.NDR_MAX_BODY_BYTES || 1024 * 1024);
 const RATE_LIMIT_WINDOW_MS = Number(process.env.NDR_RATE_LIMIT_WINDOW_MS || 60_000);
@@ -38,6 +42,9 @@ const OIDC_SCOPES = process.env.NDR_OIDC_SCOPES || "openid profile email groups"
 const ADMIN_GROUP = process.env.NDR_ADMIN_GROUP || "ndr-admin";
 const ANALYST_GROUP = process.env.NDR_ANALYST_GROUP || "ndr-analyst";
 const VIEWER_GROUP = process.env.NDR_VIEWER_GROUP || "ndr-viewer";
+const DEFAULT_TENANT = process.env.NDR_DEFAULT_TENANT || "default";
+const TENANT_CLAIM = process.env.NDR_TENANT_CLAIM || "tenant_id";
+const TEST_AUTH_ENABLED = process.env.NDR_TEST_AUTH_ENABLED === "true";
 const PUBLIC_API_PATHS = new Set(["/api/health", "/api/ready", "/api/metrics", "/api/auth/config", "/api/auth/token", "/api/ai/config"]);
 const METRICS = {
   startedAt: new Date().toISOString(),
@@ -66,6 +73,10 @@ await mkdir(DATA_DIR, { recursive: true });
 if (STORE_MODE === "local") {
   await ensureJsonFile(JOBS_FILE, []);
   await ensureJsonFile(RUNS_FILE, []);
+  await ensureJsonFile(WORKSPACES_FILE, []);
+  await ensureJsonFile(CASES_FILE, []);
+  await ensureJsonFile(EVIDENCE_FILE, []);
+  await ensureJsonFile(SOURCES_FILE, []);
   await ensureTextFile(AUDIT_FILE, "");
 }
 await restoreSchedules();
@@ -102,6 +113,7 @@ async function routeApi(req, res) {
       awsConfigured: hasAwsCredentialProvider(),
       bedrockEnabled: BEDROCK_ENABLED,
       storeMode: STORE_MODE,
+      tenantDefault: DEFAULT_TENANT,
       time: new Date().toISOString()
     });
     return;
@@ -118,7 +130,8 @@ async function routeApi(req, res) {
       auditRetentionDays: AUDIT_RETENTION_DAYS,
       oidcEnabled: Boolean(OIDC_ISSUER && OIDC_CLIENT_ID),
       bedrockEnabled: BEDROCK_ENABLED,
-      bedrockModelId: BEDROCK_ENABLED ? BEDROCK_MODEL_ID : undefined
+      bedrockModelId: BEDROCK_ENABLED ? BEDROCK_MODEL_ID : undefined,
+      tenantClaim: TENANT_CLAIM
     });
     return;
   }
@@ -145,20 +158,182 @@ async function routeApi(req, res) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/workspaces") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    sendJson(res, 200, await listTenantObjects("WORKSPACE", req.principal.tenantId, WORKSPACES_FILE));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/workspaces") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const workspace = normalizeWorkspace(body, req.principal);
+    await putTenantObject("WORKSPACE", workspace.id, workspace, req.principal.tenantId, WORKSPACES_FILE);
+    await appendAudit("workspace.saved", { workspaceId: workspace.id, name: workspace.name, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, body.id ? 200 : 201, workspace);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/workspaces/")) {
+    if (!requireRole(req, res, ["admin"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    await deleteTenantObject("WORKSPACE", id, req.principal.tenantId, WORKSPACES_FILE);
+    await appendAudit("workspace.deleted", { workspaceId: id, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/evidence-runs") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    sendJson(res, 200, await listTenantObjects("EVIDENCE", req.principal.tenantId, EVIDENCE_FILE, 50));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/evidence-runs") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const run = normalizeEvidenceRun(body, req.principal);
+    await putTenantObject("EVIDENCE", run.id, run, req.principal.tenantId, EVIDENCE_FILE);
+    await appendAudit("evidence.saved", { evidenceRunId: run.id, fileName: run.fileName, records: run.recordCount, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 201, run);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/sources") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    sendJson(res, 200, await listTenantObjects("SOURCE", req.principal.tenantId, SOURCES_FILE));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/sources") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const source = normalizeSource(body, req.principal);
+    await putTenantObject("SOURCE", source.id, source, req.principal.tenantId, SOURCES_FILE);
+    await appendAudit("source.saved", { sourceId: source.id, name: source.name, type: source.type, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, body.id ? 200 : 201, source);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/sources/")) {
+    if (!requireRole(req, res, ["admin"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    await deleteTenantObject("SOURCE", id, req.principal.tenantId, SOURCES_FILE);
+    await appendAudit("source.deleted", { sourceId: id, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/sources/") && url.pathname.endsWith("/ingest")) {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").at(-2));
+    const source = await getTenantObject("SOURCE", id, req.principal.tenantId, SOURCES_FILE);
+    if (!source) {
+      sendJson(res, 404, { error: "Managed source not found" });
+      return;
+    }
+    const result = await ingestManagedSource(source);
+    await appendRun({ ...result, tenantId: req.principal.tenantId, sourceId: source.id, sourceName: source.name });
+    await appendAudit("source.ingest.completed", { sourceId: source.id, name: source.name, source: result.source, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/sources/") && url.pathname.endsWith("/jobs")) {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").at(-2));
+    const body = await readJson(req);
+    const source = await getTenantObject("SOURCE", id, req.principal.tenantId, SOURCES_FILE);
+    if (!source) {
+      sendJson(res, 404, { error: "Managed source not found" });
+      return;
+    }
+    const ingestConfig = managedSourceIngestConfig(source);
+    const job = {
+      id: String(Date.now()),
+      tenantId: req.principal.tenantId,
+      sourceId: source.id,
+      name: body.name || `${source.name} ingest`,
+      type: ingestConfig.type,
+      intervalMinutes: Math.max(5, Number(body.intervalMinutes || source.intervalMinutes || 15)),
+      enabled: body.enabled !== false,
+      config: ingestConfig.config,
+      lastRun: null,
+      lastStatus: "never",
+      createdAt: new Date().toISOString()
+    };
+    await putJob(job);
+    await appendAudit("source.job.created", { jobId: job.id, sourceId: source.id, type: job.type, tenantId: req.principal.tenantId }, req.principal);
+    scheduleJob(job);
+    sendJson(res, 201, job);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/cases") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    sendJson(res, 200, await listTenantObjects("CASE", req.principal.tenantId, CASES_FILE));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/cases") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const caseRecord = await normalizeCase(body, req.principal);
+    await putTenantObject("CASE", caseRecord.id, caseRecord, req.principal.tenantId, CASES_FILE);
+    await appendAudit(body.id ? "case.updated" : "case.created", { caseId: caseRecord.id, title: caseRecord.title, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, body.id ? 200 : 201, caseRecord);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/api/cases/") && url.pathname.endsWith("/audit")) {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").at(-2));
+    const caseRecord = await getTenantObject("CASE", id, req.principal.tenantId, CASES_FILE);
+    if (!caseRecord) {
+      sendJson(res, 404, { error: "Case not found" });
+      return;
+    }
+    sendJson(res, 200, caseRecord.audit || []);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/cases/")) {
+    if (!requireRole(req, res, ["admin"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    await deleteTenantObject("CASE", id, req.principal.tenantId, CASES_FILE);
+    await appendAudit("case.deleted", { caseId: id, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/exports/investigation") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const exported = {
+      ...body,
+      tenantId: req.principal.tenantId,
+      exportedBy: req.principal.email || req.principal.name || req.principal.subject || "unknown",
+      exportedAt: new Date().toISOString()
+    };
+    await appendAudit("investigation.exported", { workspace: body.workspace?.name || body.source || "current", tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, exported);
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/ai/config") {
     sendJson(res, 200, aiConfig());
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/ai/ask") {
-    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
     if (!BEDROCK_ENABLED) {
       sendJson(res, 403, { error: "AWS Bedrock AI is disabled. Set NDR_BEDROCK_ENABLED=true on the backend to enable it." });
       return;
     }
     const body = await readJson(req);
     const result = await askBedrock(body);
-    await appendAudit("ai.bedrock.invoked", { mode: body.mode || "answer", modelId: BEDROCK_MODEL_ID }, req.principal);
+    await appendAudit("ai.bedrock.invoked", { mode: body.mode || "answer", modelId: BEDROCK_MODEL_ID, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, result);
     return;
   }
@@ -167,8 +342,8 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const result = await ingestS3(body);
-    await appendRun(result);
-    await appendAudit("ingest.s3.completed", { sourceLabel: result.sourceLabel, objectCount: result.objectCount }, req.principal);
+    await appendRun({ ...result, tenantId: req.principal.tenantId });
+    await appendAudit("ingest.s3.completed", { sourceLabel: result.sourceLabel, objectCount: result.objectCount, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, result);
     return;
   }
@@ -177,15 +352,15 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const result = await ingestCloudWatch(body);
-    await appendRun(result);
-    await appendAudit("ingest.cloudwatch.completed", { sourceLabel: result.sourceLabel, eventCount: result.eventCount }, req.principal);
+    await appendRun({ ...result, tenantId: req.principal.tenantId });
+    await appendAudit("ingest.cloudwatch.completed", { sourceLabel: result.sourceLabel, eventCount: result.eventCount, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, result);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/api/jobs") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listJobs());
+    sendJson(res, 200, filterTenant(await listJobs(), req.principal.tenantId));
     return;
   }
 
@@ -194,6 +369,7 @@ async function routeApi(req, res) {
     const body = await readJson(req);
     const job = {
       id: String(Date.now()),
+      tenantId: req.principal.tenantId,
       name: body.name || `${body.type || "ingest"} job`,
       type: body.type,
       intervalMinutes: Math.max(5, Number(body.intervalMinutes || 15)),
@@ -213,8 +389,13 @@ async function routeApi(req, res) {
   if (req.method === "DELETE" && url.pathname.startsWith("/api/jobs/")) {
     if (!requireRole(req, res, ["admin"])) return;
     const id = decodeURIComponent(url.pathname.split("/").pop());
+    const job = (await listJobs()).find((item) => item.id === id && sameTenant(item, req.principal.tenantId));
+    if (!job) {
+      sendJson(res, 404, { error: "Job not found" });
+      return;
+    }
     await deleteJob(id);
-    await appendAudit("job.deleted", { jobId: id }, req.principal);
+    await appendAudit("job.deleted", { jobId: id, tenantId: req.principal.tenantId }, req.principal);
     clearInterval(activeIntervals.get(id));
     activeIntervals.delete(id);
     sendJson(res, 200, { ok: true });
@@ -225,7 +406,7 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const id = decodeURIComponent(url.pathname.split("/").at(-2));
     const jobs = await listJobs();
-    const job = jobs.find((item) => item.id === id);
+    const job = jobs.find((item) => item.id === id && sameTenant(item, req.principal.tenantId));
     if (!job) {
       sendJson(res, 404, { error: "Job not found" });
       return;
@@ -237,14 +418,14 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/runs") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listRuns());
+    sendJson(res, 200, filterTenant(await listRuns(), req.principal.tenantId));
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/api/audit/export") {
     if (!requireRole(req, res, ["admin"])) return;
     await appendAudit("audit.exported", { format: "ndjson" }, req.principal);
-    const audit = await listAudit();
+    const audit = filterTenant(await listAudit(), req.principal.tenantId);
     res.statusCode = 200;
     res.writeHead(200, {
       "content-type": "application/x-ndjson; charset=utf-8",
@@ -268,11 +449,15 @@ function applySecurityHeaders(res) {
 async function authorize(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (PUBLIC_API_PATHS.has(url.pathname)) {
-    req.principal = { subject: "public", roles: ["viewer"], authType: "public" };
+    req.principal = { subject: "public", roles: ["viewer"], authType: "public", tenantId: DEFAULT_TENANT };
+    return true;
+  }
+  if (TEST_AUTH_ENABLED && req.headers["x-ndr-test-principal"]) {
+    req.principal = normalizePrincipal(JSON.parse(String(req.headers["x-ndr-test-principal"])), "test");
     return true;
   }
   if (API_KEY && req.headers["x-ndr-api-key"] === API_KEY) {
-    req.principal = { subject: "api-key", roles: ["admin"], authType: "api-key" };
+    req.principal = { subject: "api-key", roles: ["admin"], authType: "api-key", tenantId: DEFAULT_TENANT };
     return true;
   }
   const bearer = parseBearer(req.headers.authorization);
@@ -286,7 +471,7 @@ async function authorize(req, res) {
     }
   }
   if (!API_KEY && !OIDC_ISSUER) {
-    req.principal = { subject: "local-dev", roles: ["admin"], authType: "none" };
+    req.principal = { subject: "local-dev", roles: ["admin"], authType: "none", tenantId: DEFAULT_TENANT };
     return true;
   }
   sendJson(res, 401, { error: OIDC_ISSUER ? "Bearer token required" : "API key required" });
@@ -298,7 +483,9 @@ async function authConfig() {
     return {
       enabled: false,
       authMode: API_KEY ? "api-key" : "local-dev",
-      roles: { admin: ADMIN_GROUP, analyst: ANALYST_GROUP, viewer: VIEWER_GROUP }
+      roles: { admin: ADMIN_GROUP, analyst: ANALYST_GROUP, viewer: VIEWER_GROUP },
+      defaultTenant: DEFAULT_TENANT,
+      tenantClaim: TENANT_CLAIM
     };
   }
   const discovery = await getOidcDiscovery();
@@ -312,7 +499,9 @@ async function authConfig() {
     scopes: OIDC_SCOPES,
     authorizationEndpoint: discovery.authorization_endpoint,
     tokenEndpoint: "/api/auth/token",
-    roles: { admin: ADMIN_GROUP, analyst: ANALYST_GROUP, viewer: VIEWER_GROUP }
+    roles: { admin: ADMIN_GROUP, analyst: ANALYST_GROUP, viewer: VIEWER_GROUP },
+    defaultTenant: DEFAULT_TENANT,
+    tenantClaim: TENANT_CLAIM
   };
 }
 
@@ -344,7 +533,7 @@ async function exchangeOidcCode({ code, codeVerifier, redirectUri }) {
   }
   const tokenForPrincipal = tokens.id_token || tokens.access_token;
   const principal = tokenForPrincipal ? await verifyOidcToken(tokenForPrincipal) : null;
-  await appendAudit("auth.login", { authType: "oidc" }, principal || { subject: "oidc-user", roles: ["viewer"] });
+  await appendAudit("auth.login", { authType: "oidc" }, principal || { subject: "oidc-user", roles: ["viewer"], tenantId: DEFAULT_TENANT });
   return {
     accessToken: tokens.access_token || "",
     idToken: tokens.id_token || "",
@@ -482,8 +671,40 @@ async function verifyOidcToken(token) {
     email: payload.email,
     name: payload.name || payload.preferred_username || payload.email || payload.sub,
     roles: rolesFromClaims(payload),
-    authType: "oidc"
+    authType: "oidc",
+    tenantId: tenantFromClaims(payload)
   };
+}
+
+function normalizePrincipal(value = {}, authType = "test") {
+  const roles = Array.isArray(value.roles) && value.roles.length ? value.roles : ["viewer"];
+  return {
+    subject: value.subject || value.sub || "test-user",
+    email: value.email || "",
+    name: value.name || value.email || value.subject || "Test User",
+    roles,
+    authType: value.authType || authType,
+    tenantId: sanitizeTenantId(value.tenantId || value.tenant || DEFAULT_TENANT)
+  };
+}
+
+function tenantFromClaims(payload) {
+  return sanitizeTenantId(
+    payload[TENANT_CLAIM] ||
+      payload.tenant_id ||
+      payload.org_id ||
+      payload.organization ||
+      payload["custom:tenant_id"] ||
+      DEFAULT_TENANT
+  );
+}
+
+function sanitizeTenantId(value) {
+  return String(value || DEFAULT_TENANT)
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || DEFAULT_TENANT;
 }
 
 async function getJwks() {
@@ -603,13 +824,13 @@ async function runJob(job) {
   try {
     result = job.type === "s3" ? await ingestS3(job.config) : await ingestCloudWatch(job.config);
     METRICS.jobsRun += 1;
-    await appendRun({ ...result, jobId: job.id, jobName: job.name });
+    await appendRun({ ...result, tenantId: job.tenantId || DEFAULT_TENANT, jobId: job.id, jobName: job.name });
     await updateJob(job.id, { lastRun: new Date().toISOString(), lastStatus: "ok", lastError: "" });
-    await appendAudit("job.run.completed", { jobId: job.id, jobName: job.name, source: result.source }, { subject: "scheduler", roles: ["admin"] });
+    await appendAudit("job.run.completed", { jobId: job.id, jobName: job.name, source: result.source, tenantId: job.tenantId || DEFAULT_TENANT }, { subject: "scheduler", roles: ["admin"], tenantId: job.tenantId || DEFAULT_TENANT });
     return result;
   } catch (error) {
     await updateJob(job.id, { lastRun: new Date().toISOString(), lastStatus: "error", lastError: error.message });
-    await appendAudit("job.run.failed", { jobId: job.id, jobName: job.name, error: error.message }, { subject: "scheduler", roles: ["admin"] });
+    await appendAudit("job.run.failed", { jobId: job.id, jobName: job.name, error: error.message, tenantId: job.tenantId || DEFAULT_TENANT }, { subject: "scheduler", roles: ["admin"], tenantId: job.tenantId || DEFAULT_TENANT });
     throw error;
   }
 }
@@ -617,6 +838,189 @@ async function runJob(job) {
 async function restoreSchedules() {
   const jobs = await listJobs();
   jobs.forEach(scheduleJob);
+}
+
+async function listTenantObjects(kind, tenantId, file, limit = 100) {
+  if (STORE_MODE === "dynamodb") return ddbListScoped(kind, tenantId, limit);
+  const records = await readJsonFile(file, []);
+  return filterTenant(records, tenantId)
+    .sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")))
+    .slice(0, limit);
+}
+
+async function getTenantObject(kind, id, tenantId, file) {
+  const records = await listTenantObjects(kind, tenantId, file, 500);
+  return records.find((item) => String(item.id) === String(id)) || null;
+}
+
+async function putTenantObject(kind, id, value, tenantId, file) {
+  const record = { ...value, tenantId: sanitizeTenantId(tenantId) };
+  if (STORE_MODE === "dynamodb") return ddbPutScoped(kind, tenantId, id, record);
+  const records = await readJsonFile(file, []);
+  const index = records.findIndex((item) => sameTenant(item, tenantId) && String(item.id) === String(id));
+  if (index >= 0) records.splice(index, 1, record);
+  else records.unshift(record);
+  await writeJsonFile(file, records);
+  return record;
+}
+
+async function deleteTenantObject(kind, id, tenantId, file) {
+  if (STORE_MODE === "dynamodb") return ddbDeleteScoped(kind, tenantId, id);
+  const records = (await readJsonFile(file, [])).filter((item) => !(sameTenant(item, tenantId) && String(item.id) === String(id)));
+  await writeJsonFile(file, records);
+}
+
+function filterTenant(records, tenantId) {
+  return (records || []).filter((item) => sameTenant(item, tenantId));
+}
+
+function sameTenant(item, tenantId) {
+  return sanitizeTenantId(item?.tenantId || DEFAULT_TENANT) === sanitizeTenantId(tenantId || DEFAULT_TENANT);
+}
+
+function normalizeWorkspace(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const name = String(body.name || "").trim();
+  if (!name) throw new Error("Workspace name is required");
+  return {
+    id: String(body.id || `workspace-${Date.now()}`),
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    name,
+    createdAt: body.createdAt || now,
+    updatedAt: now,
+    fileName: String(body.fileName || ""),
+    evidenceText: truncateText(body.evidenceText || "", 200000),
+    records: Number(body.records || 0),
+    detections: Number(body.detections || 0),
+    high: Number(body.high || 0),
+    entities: Number(body.entities || 0),
+    bytes: Number(body.bytes || 0),
+    sourceCount: Number(body.sourceCount || 0),
+    sources: Array.isArray(body.sources) ? body.sources.slice(0, 100) : [],
+    hunts: Array.isArray(body.hunts) ? body.hunts.slice(0, 50) : [],
+    enrichment: body.enrichment && typeof body.enrichment === "object" ? body.enrichment : {},
+    ruleProfile: ["strict", "balanced", "focused"].includes(body.ruleProfile) ? body.ruleProfile : "balanced",
+    signatures: body.signatures || null
+  };
+}
+
+function normalizeEvidenceRun(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const records = Array.isArray(body.records) ? body.records.slice(0, 500) : [];
+  const analysis = body.analysis || {};
+  return {
+    id: String(body.id || `run-${Date.now()}`),
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    fileName: String(body.fileName || "Evidence run"),
+    createdAt: body.createdAt || now,
+    recordCount: Number(body.recordCount || records.length || 0),
+    detectionCount: Number(body.detectionCount || analysis.detections?.length || 0),
+    highCount: Number(body.highCount || (analysis.detections || []).filter((item) => item.severity === "high").length || 0),
+    bytes: Number(body.bytes || analysis.totals?.bytes || 0),
+    sourceLabel: String(body.sourceLabel || body.fileName || ""),
+    recordsSample: records,
+    analysisSummary: {
+      detections: (analysis.detections || []).slice(0, 25).map((item) => ({
+        id: item.id,
+        severity: item.severity,
+        title: item.title,
+        entity: item.entity,
+        confidence: item.confidence
+      })),
+      entityRisk: (analysis.entityRisk || []).slice(0, 25),
+      timeRange: analysis.timeRange || null
+    }
+  };
+}
+
+function normalizeSource(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const name = String(body.name || "").trim();
+  const scope = Array.isArray(body.scope)
+    ? body.scope.map(String).map((item) => item.trim()).filter(Boolean)
+    : String(body.scope || "").split(/\s+/).map((item) => item.trim()).filter(Boolean);
+  if (!name) throw new Error("Source name is required");
+  if (!scope.length) throw new Error("Source scope is required");
+  return {
+    id: String(body.id || `source-${Date.now()}`),
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    name,
+    type: String(body.type || "AWS VPC"),
+    account: String(body.account || ""),
+    region: String(body.region || ""),
+    scope,
+    createdAt: body.createdAt || now,
+    updatedAt: now
+  };
+}
+
+async function normalizeCase(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const title = String(body.title || "").trim();
+  if (!title) throw new Error("Case title is required");
+  const existing = body.id ? await getTenantObject("CASE", body.id, principal.tenantId, CASES_FILE) : null;
+  const audit = existing?.audit || [];
+  const action = existing ? "Case updated" : "Case created";
+  return {
+    id: String(body.id || `case-${Date.now()}`),
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    title,
+    assignee: String(body.assignee || "Unassigned"),
+    status: String(body.status || "New"),
+    severity: ["high", "medium", "low"].includes(body.severity) ? body.severity : "medium",
+    notes: String(body.notes || ""),
+    linkedDetection: String(body.linkedDetection || ""),
+    createdAt: existing?.createdAt || body.createdAt || now,
+    updatedAt: now,
+    createdBy: existing?.createdBy || principal.email || principal.name || principal.subject || "unknown",
+    audit: [
+      {
+        id: `case-audit-${Date.now()}`,
+        action,
+        detail: title,
+        actor: principal.email || principal.name || principal.subject || "unknown",
+        roles: principal.roles || [],
+        createdAt: now
+      },
+      ...audit
+    ].slice(0, 100)
+  };
+}
+
+async function ingestManagedSource(source) {
+  const ingestConfig = managedSourceIngestConfig(source);
+  const result = ingestConfig.type === "s3" ? await ingestS3(ingestConfig.config) : await ingestCloudWatch(ingestConfig.config);
+  return {
+    ...result,
+    managedSourceId: source.id,
+    managedSourceName: source.name
+  };
+}
+
+function managedSourceIngestConfig(source) {
+  const scope = source.scope || [];
+  const type = String(source.type || "").toLowerCase();
+  const region = source.region || DDB_REGION;
+  if (type.includes("s3") || scope.some((item) => String(item).startsWith("s3://"))) {
+    const reference = scope.find((item) => String(item).startsWith("s3://")) || scope.find((item) => !String(item).startsWith("/"));
+    const parsed = parseS3Reference(reference || "");
+    if (!parsed.bucket) throw new Error("Managed S3 sources need a scope like s3://bucket/prefix.");
+    return { type: "s3", config: { region, bucket: parsed.bucket, prefix: parsed.prefix, maxObjects: 20 } };
+  }
+  if (type.includes("cloudwatch") || scope.some((item) => String(item).startsWith("/aws/"))) {
+    const logGroupName = scope.find((item) => String(item).startsWith("/aws/"));
+    if (!logGroupName) throw new Error("Managed CloudWatch sources need a /aws/... log group scope.");
+    return { type: "cloudwatch", config: { region, logGroupName, filterPattern: "", limit: 2000 } };
+  }
+  throw new Error("Managed source cannot be ingested directly. Add an S3 prefix or CloudWatch log group scope.");
+}
+
+function parseS3Reference(reference) {
+  const value = String(reference || "").trim();
+  const stripped = value.startsWith("s3://") ? value.slice(5) : value;
+  const slash = stripped.indexOf("/");
+  if (slash < 0) return { bucket: stripped, prefix: "" };
+  return { bucket: stripped.slice(0, slash), prefix: stripped.slice(slash + 1) };
 }
 
 function scheduleJob(job) {
@@ -637,7 +1041,7 @@ async function updateJob(id, patch) {
 }
 
 async function appendRun(run) {
-  const runRecord = { id: String(Date.now()), ...run, text: undefined, createdAt: new Date().toISOString() };
+  const runRecord = { id: String(Date.now()), tenantId: run.tenantId || DEFAULT_TENANT, ...run, text: undefined, createdAt: new Date().toISOString() };
   await putRun(runRecord);
   METRICS.ingestRuns += 1;
 }
@@ -681,6 +1085,7 @@ async function appendAudit(action, details = {}, principal = {}) {
     action,
     actor: principal.email || principal.name || principal.subject || "system",
     roles: principal.roles || [],
+    tenantId: principal.tenantId || details.tenantId || DEFAULT_TENANT,
     details
   };
   if (STORE_MODE === "dynamodb") return ddbPut("AUDIT", entry.id, entry);
@@ -747,6 +1152,61 @@ async function ddbList(kind, limit = 100) {
     }
   });
   return (result.Items || []).map((item) => JSON.parse(item.payload.S));
+}
+
+async function ddbPutScoped(kind, tenantId, id, value) {
+  requireDynamo();
+  const now = value.createdAt || new Date().toISOString();
+  await awsJsonRequest({
+    service: "dynamodb",
+    region: DDB_REGION,
+    target: "DynamoDB_20120810.PutItem",
+    payload: {
+      TableName: DDB_TABLE,
+      Item: {
+        pk: { S: tenantPartition(kind, tenantId) },
+        sk: { S: id },
+        tenantId: { S: sanitizeTenantId(tenantId) },
+        kind: { S: kind },
+        createdAt: { S: now },
+        payload: { S: JSON.stringify(value) }
+      }
+    }
+  });
+}
+
+async function ddbDeleteScoped(kind, tenantId, id) {
+  requireDynamo();
+  await awsJsonRequest({
+    service: "dynamodb",
+    region: DDB_REGION,
+    target: "DynamoDB_20120810.DeleteItem",
+    payload: {
+      TableName: DDB_TABLE,
+      Key: { pk: { S: tenantPartition(kind, tenantId) }, sk: { S: id } }
+    }
+  });
+}
+
+async function ddbListScoped(kind, tenantId, limit = 100) {
+  requireDynamo();
+  const result = await awsJsonRequest({
+    service: "dynamodb",
+    region: DDB_REGION,
+    target: "DynamoDB_20120810.Query",
+    payload: {
+      TableName: DDB_TABLE,
+      KeyConditionExpression: "pk = :pk",
+      ExpressionAttributeValues: { ":pk": { S: tenantPartition(kind, tenantId) } },
+      ScanIndexForward: false,
+      Limit: limit
+    }
+  });
+  return (result.Items || []).map((item) => JSON.parse(item.payload.S));
+}
+
+function tenantPartition(kind, tenantId) {
+  return `TENANT#${sanitizeTenantId(tenantId)}#${kind}`;
 }
 
 function requireDynamo() {

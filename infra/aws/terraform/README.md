@@ -6,7 +6,7 @@ This Terraform module provisions a production-oriented AWS path for SignalPrism 
 - ECS Fargate cluster, task definition, service, and CPU autoscaling
 - Application Load Balancer with health checks and optional HTTPS listener
 - Encrypted EFS access point mounted at `/mnt/ndr-data`
-- DynamoDB table for jobs, ingest runs, and audit records
+- DynamoDB table for tenant workspaces, cases, evidence runs, managed sources, jobs, ingest runs, and audit records
 - Secrets Manager secrets for `NDR_API_KEY` and optional OIDC client secret
 - CloudWatch Logs with configurable retention
 - S3 audit bucket with versioning, public access block, encryption, and Object Lock COMPLIANCE retention
@@ -39,7 +39,7 @@ terraform apply \
 
 ## Persistence
 
-Production defaults to `NDR_STORE=dynamodb`. Local JSON persistence remains available for development, but DynamoDB should be used for shared environments because it survives task replacement and supports point-in-time recovery.
+Production defaults to `NDR_STORE=dynamodb`. Local JSON persistence remains available for development, but DynamoDB should be used for shared environments because it survives task replacement and supports point-in-time recovery. Tenant-scoped objects use `TENANT#<tenantId>#<kind>` partitions.
 
 EFS is still mounted for larger local evidence scratch data and future IndexedDB/API evidence migration work. It is encrypted at rest and mounted with an access point.
 
@@ -53,6 +53,7 @@ The app writes append-only audit records with a `retentionUntil` timestamp. The 
 - Use private subnets for tasks.
 - Restrict `allowed_ingress_cidrs` to corporate/VPN ranges or place the ALB behind stronger perimeter controls.
 - Map IdP groups to `admin`, `analyst`, and `viewer` with `admin_group`, `analyst_group`, and `viewer_group`.
+- Set `tenant_claim` to the OIDC claim that identifies the tenant or organization boundary.
 - Use task roles rather than static AWS keys in production.
 - Leave `bedrock_enabled=false` unless the environment is approved for AI-assisted analysis.
 - Scope `bedrock_model_arns` to approved foundation model or inference profile ARNs instead of `*`.

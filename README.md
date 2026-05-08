@@ -38,9 +38,9 @@ Cloud ingest uses environment credentials:
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_SESSION_TOKEN=... npm start
 ```
 
-The backend stores local job metadata under `.ndr-data/` by default. Set `NDR_STORE=dynamodb` and `NDR_DDB_TABLE` to use DynamoDB for jobs, ingest runs, and audit records.
+The backend stores tenant workspaces, cases, evidence-run metadata, managed sources, job metadata, ingest runs, and audit records under `.ndr-data/` by default. Set `NDR_STORE=dynamodb` and `NDR_DDB_TABLE` to use DynamoDB for the tenant store.
 
-For shared environments, set `NDR_API_KEY` and configure clients to send `x-ndr-api-key`, or configure OIDC/SSO with `NDR_OIDC_ISSUER`, `NDR_OIDC_CLIENT_ID`, `NDR_OIDC_AUDIENCE`, and the role group mappings. The backend supports `admin`, `analyst`, and `viewer` roles.
+For shared environments, set `NDR_API_KEY` and configure clients to send `x-ndr-api-key`, or configure OIDC/SSO with `NDR_OIDC_ISSUER`, `NDR_OIDC_CLIENT_ID`, `NDR_OIDC_AUDIENCE`, `NDR_TENANT_CLAIM`, and the role group mappings. The backend supports tenant-aware `admin`, `analyst`, and `viewer` roles.
 
 Enable AWS Bedrock AI assistance with:
 
@@ -76,6 +76,12 @@ Run backend integration checks with:
 npm run integration
 ```
 
+Run automated UI workflow checks with:
+
+```bash
+npm run ui:test
+```
+
 Build the dependency-free distributable with:
 
 ```bash
@@ -101,7 +107,7 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 6. Tune the detection profile for strict, balanced, or focused review.
 7. Pivot into entity risk, entity timeline, internal paths, external paths, or filtered raw records.
 8. Run advanced hunts with fielded queries and save reusable hunts.
-9. Track managed sources, coverage, ingest history, and saved baselines.
+9. Track managed sources, coverage, ingest history, and saved baselines, then ingest or schedule CloudWatch/S3 imports directly from source inventory.
 10. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
 11. Simulate traffic reduction policies and export detections, records, and full investigation packages.
 
@@ -115,7 +121,7 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 - Azure NSG Flow Log JSON.
 - GCP VPC Flow Log JSON.
 
-All analysis runs in the browser. Uploaded log contents are not sent to a server.
+Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, managed source definitions, and controlled investigation exports are persisted through tenant-scoped APIs.
 
 ## NDR detections
 
@@ -151,17 +157,18 @@ All analysis runs in the browser. Uploaded log contents are not sent to a server
 - Backend S3 and CloudWatch ingest with AWS SigV4 signing.
 - Scheduled local ingest jobs.
 - API key protection, OIDC/SSO login with RBAC, rate limiting, request-size limits, security headers, structured logs, health/readiness, and Prometheus-style metrics.
-- DynamoDB persistence option for jobs, runs, and audit records.
+- DynamoDB persistence option for tenant workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
 - Append-only audit export with retention metadata and Terraform Object Lock retention.
 - Feature-flagged AWS Bedrock assistant for natural-language investigation questions and AI-generated summaries.
 - Bedrock prompt presets for top risk, executive summary, attack path, containment, evidence gaps, and SIEM query ideas.
-- IndexedDB evidence and case persistence.
-- Local investigation workspaces with guided demo mode.
+- IndexedDB evidence and case fallback when the backend is offline.
+- Tenant-backed investigation workspaces with guided demo mode.
 - Case queue with status, severity override, assignee, notes, and audit log.
 - Detection explainability, confidence interpretation, and tunable rule profiles.
-- Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, and prefixes.
-- Portable investigation package export.
-- Visual topology map with time replay slider.
+- Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, prefixes, direct ingest, and schedule creation.
+- RBAC-controlled portable investigation package export.
+- Visual topology map with playable time replay, scrubbing, step controls, and recent-event trail.
+- Automated UI flow tests for upload/demo analysis, rule tuning, AI context, investigation export, and topology replay.
 
 ## Data model
 
@@ -171,4 +178,7 @@ All analysis runs in the browser. Uploaded log contents are not sent to a server
 - `Path`: ranked internal or external source-to-destination traffic path.
 - `ParserIssue`: skipped-line quality signal with line number and message.
 - `IngestJob`: scheduled S3 or CloudWatch import config, interval, enabled state, and last run status.
+- `Workspace`: tenant, name, current evidence snapshot, detections, source inventory, hunts, enrichment, rule profile, and baseline signatures.
+- `Case`: tenant, title, assignee, status, severity override, notes, linked detection, and audit trail.
+- `ManagedSource`: tenant, source type, account, region, scope, and inferred S3/CloudWatch ingest target.
 - `AuditRecord`: append-only actor, role, action, details, creation time, and retention deadline.

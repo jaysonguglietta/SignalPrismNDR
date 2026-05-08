@@ -28,6 +28,10 @@ Local mode stores:
 
 - `jobs.json`
 - `ingest-runs.json`
+- `workspaces.json`
+- `cases.json`
+- `evidence-runs.json`
+- `sources.json`
 - `audit.ndjson`
 
 DynamoDB mode uses:
@@ -35,6 +39,7 @@ DynamoDB mode uses:
 - Partition key: `pk`
 - Sort key: `sk`
 - Record payload: JSON string in `payload`
+- Tenant partitions: `TENANT#<tenantId>#WORKSPACE`, `TENANT#<tenantId>#CASE`, `TENANT#<tenantId>#EVIDENCE`, and `TENANT#<tenantId>#SOURCE`.
 
 ## AWS Credentials
 
@@ -63,8 +68,16 @@ ECS/Fargate deployments should use task roles. The backend supports ECS containe
 | `NDR_ADMIN_GROUP` | `ndr-admin` | IdP group mapped to `admin`. |
 | `NDR_ANALYST_GROUP` | `ndr-analyst` | IdP group mapped to `analyst`. |
 | `NDR_VIEWER_GROUP` | `ndr-viewer` | IdP group mapped to `viewer`. |
+| `NDR_DEFAULT_TENANT` | `default` | Tenant used for API-key and local-dev sessions. |
+| `NDR_TENANT_CLAIM` | `tenant_id` | OIDC claim used to resolve tenant ownership. |
 
 Tokens must be RS256 signed. The backend checks issuer, optional audience, expiry, not-before, and JWKS signature.
+
+RBAC is enforced server-side:
+
+- `admin`: full tenant access, source/case/job deletes, audit export.
+- `analyst`: save workspaces, cases, sources, evidence runs, run/schedule ingest, export investigations, and invoke Bedrock.
+- `viewer`: read tenant workspaces, cases, sources, evidence runs, jobs, and runs.
 
 ## Bedrock AI Assistant
 

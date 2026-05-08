@@ -187,6 +187,18 @@ variable "viewer_group" {
   default     = "ndr-viewer"
 }
 
+variable "default_tenant" {
+  type        = string
+  description = "Tenant ID used for API-key and local-dev sessions."
+  default     = "default"
+}
+
+variable "tenant_claim" {
+  type        = string
+  description = "OIDC claim used to resolve tenant ownership."
+  default     = "tenant_id"
+}
+
 variable "bedrock_enabled" {
   type        = bool
   description = "Feature flag for AWS Bedrock AI assistant endpoints."

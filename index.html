@@ -409,7 +409,7 @@
                   <label class="field-label" for="sourceRegionInput">Region</label>
                   <input id="sourceRegionInput" type="text" placeholder="us-east-1">
                   <label class="field-label" for="sourceScopeInput">Expected ENIs, CIDRs, log groups, or prefixes</label>
-                  <textarea id="sourceScopeInput" class="short-textarea" spellcheck="false" placeholder="eni-0a1b2c3d&#10;eni-0e4f5a6b&#10;10.0.0.0/16&#10;/aws/vpc/flowlogs/prod"></textarea>
+                  <textarea id="sourceScopeInput" class="short-textarea" spellcheck="false" placeholder="eni-0a1b2c3d&#10;eni-0e4f5a6b&#10;10.0.0.0/16&#10;/aws/vpc/flowlogs/prod&#10;s3://my-flowlogs/AWSLogs/123456789012/vpcflowlogs/"></textarea>
                   <div class="quality-list" id="sourceWatchlist"></div>
                 </div>
               </article>
@@ -608,9 +608,18 @@
                   <span class="panel-note" id="replayTimeLabel">All evidence</span>
                 </div>
                 <div class="topology-canvas" id="topologyCanvas"></div>
-                <div class="tool-body">
-                  <label class="field-label" for="replayRangeInput">Time replay</label>
+                <div class="tool-body replay-controls">
+                  <div class="section-heading">
+                    <label class="field-label" for="replayRangeInput">Time replay</label>
+                    <span class="panel-note" id="replayEventCountLabel">0 of 0 records</span>
+                  </div>
                   <input id="replayRangeInput" type="range" min="0" max="100" value="100">
+                  <div class="button-row">
+                    <button class="ghost-button compact" id="stepReplayBackButton" type="button">Back</button>
+                    <button class="ghost-button compact" id="playReplayButton" type="button">Play</button>
+                    <button class="ghost-button compact" id="stepReplayForwardButton" type="button">Forward</button>
+                  </div>
+                  <div class="quality-list replay-events" id="replayEventList"></div>
                 </div>
               </article>
             </div>

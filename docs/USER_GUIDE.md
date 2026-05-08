@@ -10,7 +10,7 @@ npm start
 
 Open `http://localhost:4173`.
 
-For file-only local analysis, open `index.html` directly in a browser. Cloud ingest, jobs, SSO, audit export, and Bedrock require the backend.
+For file-only local analysis, open `index.html` directly in a browser. Tenant persistence, cloud ingest, jobs, SSO, controlled exports, audit export, and Bedrock require the backend.
 
 ## Guided Demo
 
@@ -27,7 +27,7 @@ Use this when evaluating the product or presenting it to stakeholders.
 
 ## Investigation Workspaces
 
-The `Investigation` panel stores repeatable local workspaces. A workspace can retain:
+The `Investigation` panel stores repeatable workspaces. With the backend running, workspaces are saved to the tenant store. Without the backend, the browser uses local fallback storage. A workspace can retain:
 
 - Name and source file label.
 - Evidence text snapshot.
@@ -96,7 +96,7 @@ Profiles:
 - `Balanced`: default triage mix.
 - `Focused`: suppresses lower-confidence medium and low items for executive triage.
 
-Rule profile changes are stored locally and included in investigation packages.
+Rule profile changes are included in saved workspaces and investigation packages.
 
 ## Pivot Through Entities
 
@@ -143,6 +143,13 @@ Open `Coverage` to track:
 Use baselines to catch new entities, destination ports, applications, and paths.
 
 Managed sources can include source type, account or owner, region, expected ENIs, CIDRs, CloudWatch log groups, and S3 prefixes.
+
+For direct ingest from source inventory:
+
+- Use a CloudWatch source with a `/aws/...` log group in scope.
+- Use an S3 source with a scope like `s3://bucket/AWSLogs/account/vpcflowlogs/`.
+- Select `Ingest` on the source entry to pull evidence immediately.
+- Select `Schedule` to create a recurring backend ingest job from the source.
 
 ## Enrichment
 
@@ -202,11 +209,11 @@ Fields:
 - Severity.
 - Notes.
 
-Case audit history is stored in IndexedDB and records creation, updates, severity changes, and deletion.
+Case audit history is saved in the tenant store when the backend is available, with IndexedDB as local fallback. Viewers can read cases; analysts and admins can create or update them; only admins can delete.
 
 ## Topology Replay
 
-Open `Topology` to visualize entity-to-entity paths. Move the replay slider to focus on activity up to a point in time.
+Open `Topology` to visualize entity-to-entity paths. Move the replay slider to focus on activity up to a point in time, use `Play` for replay, or step backward and forward through the timeline. The recent-event trail shows the latest records included at the current replay position.
 
 Use topology to explain lateral paths, high-volume egress, and repeated external contacts.
 
@@ -232,7 +239,7 @@ Use presets for common workflows:
 - Evidence gaps.
 - SIEM query ideas.
 
-The assistant sends a bounded investigation context through the backend, not the entire raw upload.
+The assistant sends a bounded investigation context through the backend, not the entire raw upload. AI actions require `admin` or `analyst`.
 
 ## Export
 
@@ -248,4 +255,4 @@ Supported exports:
 
 Use redacted exports when sharing evidence outside the security team.
 
-The investigation package includes workspace metadata, summary counts, detections, observations, top entities, topology paths, managed sources, saved hunts, cases, summaries, AI answer text, and a bounded record sample.
+The investigation package includes workspace metadata, summary counts, detections, observations, top entities, topology paths, managed sources, saved hunts, cases, summaries, AI answer text, and a bounded record sample. When the backend is running, package export is RBAC-controlled and audited.

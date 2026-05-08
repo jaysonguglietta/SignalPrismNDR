@@ -9,6 +9,7 @@ import { createSignedAwsRequest } from "./src/aws-sigv4.mjs";
 const root = dirname(fileURLToPath(import.meta.url));
 
 await testApiAuth();
+await testTenantScopedRbac();
 await testRateLimit();
 testAwsSigning();
 
@@ -65,6 +66,96 @@ async function testApiAuth() {
       headers: { "x-ndr-api-key": "integration-key" }
     });
     assert.equal(deleteResponse.status, 200);
+
+    const workspaceResponse = await fetch(`${base}/api/workspaces`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ name: "Integration workspace", records: 3, detections: 1, evidenceText: "sample" })
+    });
+    assert.equal(workspaceResponse.status, 201);
+    assert.equal((await workspaceResponse.json()).tenantId, "default");
+
+    const sourceResponse = await fetch(`${base}/api/sources`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ name: "Prod Flow Logs", type: "CloudWatch Log Group", region: "us-east-1", scope: ["/aws/vpc/flowlogs/prod"] })
+    });
+    assert.equal(sourceResponse.status, 201);
+
+    const caseResponse = await fetch(`${base}/api/cases`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ title: "Integration case", severity: "high", status: "New" })
+    });
+    assert.equal(caseResponse.status, 201);
+
+    const evidenceResponse = await fetch(`${base}/api/evidence-runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ fileName: "integration.log", recordCount: 1, records: [{ source: "10.0.0.1", destination: "8.8.8.8" }] })
+    });
+    assert.equal(evidenceResponse.status, 201);
+
+    const exportResponse = await fetch(`${base}/api/exports/investigation`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ product: "SignalPrism NDR", source: "integration" })
+    });
+    assert.equal(exportResponse.status, 200);
+    assert.equal((await exportResponse.json()).tenantId, "default");
+  } finally {
+    await stopServer(server);
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}
+
+async function testTenantScopedRbac() {
+  const dataDir = await mkdtemp(join(tmpdir(), "ndr-tenant-"));
+  const server = await startServer({
+    PORT: "4193",
+    NDR_DATA_DIR: dataDir,
+    NDR_TEST_AUTH_ENABLED: "true",
+    NDR_RATE_LIMIT_MAX: "100",
+    NDR_STORE: "local"
+  });
+  const base = "http://127.0.0.1:4193";
+  const analyst = testPrincipal({ subject: "analyst-a", roles: ["analyst"], tenantId: "tenant-a" });
+  const viewer = testPrincipal({ subject: "viewer-a", roles: ["viewer"], tenantId: "tenant-a" });
+  const analystB = testPrincipal({ subject: "analyst-b", roles: ["analyst"], tenantId: "tenant-b" });
+  try {
+    const createCase = await fetch(`${base}/api/cases`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": analyst },
+      body: JSON.stringify({ title: "Tenant A case", severity: "medium" })
+    });
+    assert.equal(createCase.status, 201);
+
+    const viewerCreate = await fetch(`${base}/api/cases`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": viewer },
+      body: JSON.stringify({ title: "Viewer should not write" })
+    });
+    assert.equal(viewerCreate.status, 403);
+
+    const tenantAList = await fetch(`${base}/api/cases`, { headers: { "x-ndr-test-principal": viewer } });
+    assert.equal((await tenantAList.json()).length, 1);
+
+    const tenantBList = await fetch(`${base}/api/cases`, { headers: { "x-ndr-test-principal": analystB } });
+    assert.equal((await tenantBList.json()).length, 0);
+
+    const viewerExport = await fetch(`${base}/api/exports/investigation`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": viewer },
+      body: JSON.stringify({ product: "SignalPrism NDR" })
+    });
+    assert.equal(viewerExport.status, 403);
+
+    const viewerAi = await fetch(`${base}/api/ai/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": viewer },
+      body: JSON.stringify({ question: "summarize", context: {} })
+    });
+    assert.equal(viewerAi.status, 403);
   } finally {
     await stopServer(server);
     await rm(dataDir, { recursive: true, force: true });
@@ -119,7 +210,7 @@ function testAwsSigning() {
 async function startServer(env) {
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: root,
-    env: { ...process.env, HOST: "127.0.0.1", ...env, AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "", NDR_OIDC_ISSUER: "" },
+    env: { ...process.env, HOST: "127.0.0.1", NDR_TEST_AUTH_ENABLED: "false", ...env, AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "", NDR_OIDC_ISSUER: "" },
     stdio: ["ignore", "pipe", "pipe"]
   });
   await waitForStartup(child);
@@ -152,4 +243,8 @@ function stopServer(child) {
     child.once("exit", resolve);
     child.kill("SIGTERM");
   });
+}
+
+function testPrincipal(principal) {
+  return JSON.stringify(principal);
 }

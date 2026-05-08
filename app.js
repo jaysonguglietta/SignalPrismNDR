@@ -157,6 +157,8 @@ const state = {
   selectedEntity: null,
   huntResults: [],
   sort: { field: "start", direction: "desc" },
+  backend: { online: false, authMode: "local-dev", principal: null },
+  replayTimer: null,
   pendingConfirm: null
 };
 
@@ -307,8 +309,13 @@ function cacheElements() {
     "caseAuditTitle",
     "caseAuditList",
     "topologyCanvas",
+    "playReplayButton",
+    "stepReplayBackButton",
+    "stepReplayForwardButton",
     "replayRangeInput",
     "replayTimeLabel",
+    "replayEventCountLabel",
+    "replayEventList",
     "toastRegion",
     "confirmDialog",
     "confirmTitle",
@@ -449,8 +456,12 @@ function wireEvents() {
   els.saveSourceButton.addEventListener("click", saveSourceConfig);
   els.clearSourcesButton.addEventListener("click", clearSourceConfigs);
   els.sourceWatchlist.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-delete-source]");
-    if (button) deleteSourceConfig(button.dataset.deleteSource);
+    const deleteButton = event.target.closest("[data-delete-source]");
+    const ingestButton = event.target.closest("[data-ingest-source]");
+    const scheduleButton = event.target.closest("[data-schedule-source]");
+    if (deleteButton) deleteSourceConfig(deleteButton.dataset.deleteSource);
+    if (ingestButton) ingestManagedSource(ingestButton.dataset.ingestSource);
+    if (scheduleButton) scheduleManagedSourceJob(scheduleButton.dataset.scheduleSource);
   });
   els.saveBaselineButton.addEventListener("click", saveCurrentBaseline);
   els.deleteBaselineButton.addEventListener("click", deleteBaseline);
@@ -498,6 +509,9 @@ function wireEvents() {
     if (edit) editCase(edit.dataset.editCase);
     if (del) deleteCaseById(del.dataset.deleteCase);
   });
+  els.playReplayButton.addEventListener("click", toggleTopologyReplay);
+  els.stepReplayBackButton.addEventListener("click", () => stepTopologyReplay(-10));
+  els.stepReplayForwardButton.addEventListener("click", () => stepTopologyReplay(10));
   els.replayRangeInput.addEventListener("input", renderTopology);
   els.confirmDialog.addEventListener("close", () => {
     if (els.confirmDialog.returnValue === "confirm" && state.pendingConfirm) {
@@ -585,8 +599,10 @@ async function initializePersistentData() {
     ]);
     const loginResult = await backendApi.completeSsoCallback();
     if (loginResult?.principal) showToast(`Signed in as ${loginResult.principal.name || loginResult.principal.subject}.`);
-    await refreshCases();
     await refreshBackendStatus();
+    await refreshServerWorkspaces();
+    await refreshManagedSourcesFromBackend();
+    await refreshCases();
   } catch (error) {
     showToast(`Module initialization warning: ${error.message}`, "warn");
   }
@@ -645,7 +661,18 @@ function createWorkspaceDraft() {
   showToast("New workspace draft started.");
 }
 
-function saveWorkspaceSnapshot() {
+async function refreshServerWorkspaces() {
+  if (!backendApi) return;
+  try {
+    const workspaces = await backendApi.listWorkspaces();
+    saveJson(STORAGE_KEYS.workspaces, workspaces);
+    renderWorkspaces();
+  } catch (error) {
+    if (state.backend.online) showToast(`Workspace sync unavailable: ${error.message}`, "warn");
+  }
+}
+
+async function saveWorkspaceSnapshot() {
   const name = els.workspaceNameInput.value.trim();
   if (!name) return setInputMessage("Workspace name is required.");
   const workspaces = loadJson(STORAGE_KEYS.workspaces, []);
@@ -671,11 +698,23 @@ function saveWorkspaceSnapshot() {
     ruleProfile: loadJson(STORAGE_KEYS.ruleProfile, "balanced"),
     signatures: state.analysis ? buildBaselineSignature(state.analysis) : null
   };
+  let saved = workspace;
+  if (backendApi) {
+    try {
+      saved = await backendApi.saveWorkspace(workspace);
+    } catch (error) {
+      if (state.backend.online) {
+        setInputMessage(`Workspace was not saved to the tenant store: ${error.message}`);
+        return;
+      }
+    }
+  }
   if (existingIndex >= 0) workspaces.splice(existingIndex, 1, workspace);
-  else workspaces.unshift(workspace);
+  else workspaces.unshift(saved);
+  if (existingIndex >= 0) workspaces[existingIndex] = saved;
   saveJson(STORAGE_KEYS.workspaces, workspaces.slice(0, 20));
-  state.activeWorkspaceId = workspace.id;
-  saveJson(STORAGE_KEYS.activeWorkspace, workspace.id);
+  state.activeWorkspaceId = saved.id;
+  saveJson(STORAGE_KEYS.activeWorkspace, saved.id);
   renderWorkspaces();
   showToast(existing ? "Workspace updated." : "Workspace saved.");
 }
@@ -734,20 +773,24 @@ async function loadGuidedDemo() {
   ]);
   runAnalysis(SAMPLE_LOG, "Guided demo VPC flow evidence");
   window.setTimeout(async () => {
-    saveWorkspaceSnapshot();
-    if (idbApi?.saveCase && state.analysis?.detections?.[0]) {
+    await saveWorkspaceSnapshot();
+    if (state.analysis?.detections?.[0]) {
       const detection = state.analysis.detections[0];
-      await idbApi.saveCase({
-        title: `Demo: ${detection.title}`,
-        assignee: "SOC analyst",
-        status: "Triage",
-        severity: detection.severity,
-        notes: `${detection.copy}\n\nResponse guidance: ${detection.response?.[0] || "Review linked evidence."}`,
-        linkedDetection: detection.id,
-        auditAction: "Demo case created",
-        auditDetail: detection.title
-      });
-      await refreshCases();
+      try {
+        await saveCaseRecord({
+          title: `Demo: ${detection.title}`,
+          assignee: "SOC analyst",
+          status: "Triage",
+          severity: detection.severity,
+          notes: `${detection.copy}\n\nResponse guidance: ${detection.response?.[0] || "Review linked evidence."}`,
+          linkedDetection: detection.id,
+          auditAction: "Demo case created",
+          auditDetail: detection.title
+        });
+        await refreshCases();
+      } catch (error) {
+        showToast(`Demo case was not saved: ${error.message}`, "warn");
+      }
     }
     els.aiPromptPreset.value = "Which entities should I investigate first and why?";
     applyAiPromptPreset();
@@ -2009,7 +2052,8 @@ function renderEmptyDashboard() {
     els.analystSummary,
     els.policyRecommendations,
     els.entityDetail,
-    els.topologyCanvas
+    els.topologyCanvas,
+    els.replayEventList
   ].forEach((el) => {
     if (el) el.innerHTML = emptyState();
   });
@@ -2020,6 +2064,12 @@ function renderEmptyDashboard() {
   els.entityDetailTitle.textContent = "Select an entity";
   els.entityDetailMeta.textContent = "No entity selected";
   els.replayTimeLabel.textContent = "All evidence";
+  if (els.replayEventCountLabel) els.replayEventCountLabel.textContent = "0 of 0 records";
+  if (els.playReplayButton) els.playReplayButton.textContent = "Play";
+  if (state.replayTimer) {
+    window.clearInterval(state.replayTimer);
+    state.replayTimer = null;
+  }
   state.huntResults = [];
   renderHuntResults();
   renderSavedHunts();
@@ -2526,7 +2576,18 @@ function uniqueRawValues(field) {
   return new Set(state.records.map((record) => record.raw?.[field]).filter((value) => value && value !== "-"));
 }
 
-function saveSourceConfig() {
+async function refreshManagedSourcesFromBackend() {
+  if (!backendApi) return;
+  try {
+    const sources = await backendApi.listSources();
+    saveJson(STORAGE_KEYS.sources, sources);
+    renderCoverage();
+  } catch (error) {
+    if (state.backend.online) showToast(`Managed source sync unavailable: ${error.message}`, "warn");
+  }
+}
+
+async function saveSourceConfig() {
   const name = els.sourceNameInput.value.trim();
   const scope = els.sourceScopeInput.value.split(/\s+/).map((value) => value.trim()).filter(Boolean);
   if (!name || !scope.length) {
@@ -2541,7 +2602,7 @@ function saveSourceConfig() {
   const sources = loadJson(STORAGE_KEYS.sources, []);
   const existingIndex = sources.findIndex((source) => source.name.toLowerCase() === name.toLowerCase());
   const item = {
-    id: existingIndex >= 0 ? sources[existingIndex].id : Date.now(),
+    id: existingIndex >= 0 ? sources[existingIndex].id : `source-${Date.now()}`,
     name,
     type: els.sourceTypeInput.value,
     account: els.sourceAccountInput.value.trim(),
@@ -2549,10 +2610,21 @@ function saveSourceConfig() {
     scope,
     createdAt: sources[existingIndex]?.createdAt || new Date().toISOString()
   };
+  let saved = item;
+  if (backendApi) {
+    try {
+      saved = await backendApi.saveSource(item);
+    } catch (error) {
+      if (state.backend.online) {
+        setInputMessage(`Source was not saved to the tenant store: ${error.message}`);
+        return;
+      }
+    }
+  }
   if (existingIndex >= 0) {
-    sources.splice(existingIndex, 1, item);
+    sources.splice(existingIndex, 1, saved);
   } else {
-    sources.unshift(item);
+    sources.unshift(saved);
   }
   saveJson(STORAGE_KEYS.sources, sources.slice(0, 20));
   els.sourceNameInput.value = "";
@@ -2564,7 +2636,7 @@ function saveSourceConfig() {
 }
 
 function isValidScopeValue(value) {
-  return /^eni-[a-z0-9]+$/i.test(value) || /^(\d{1,3}\.){3}\d{1,3}(\/([0-9]|[12][0-9]|3[0-2]))?$/.test(value) || /^\/aws\/[\w/.-]+$/i.test(value) || /^[\w./=-]+\/?$/.test(value);
+  return /^eni-[a-z0-9]+$/i.test(value) || /^(\d{1,3}\.){3}\d{1,3}(\/([0-9]|[12][0-9]|3[0-2]))?$/.test(value) || /^\/aws\/[\w/.-]+$/i.test(value) || /^s3:\/\/[\w.-]+\/?[\w./=-]*$/i.test(value) || /^[\w./=-]+\/?$/.test(value);
 }
 
 function renderSourceWatchlist(sources) {
@@ -2578,9 +2650,44 @@ function renderSourceWatchlist(sources) {
       <strong>${escapeHtml(source.name)}</strong>
       <span>${escapeHtml([source.type, source.account, source.region].filter(Boolean).join(" - ") || "Managed source")}</span>
       <span>${escapeHtml(source.scope.join(", "))}</span>
-      <button class="mini-button danger inline-action" type="button" data-delete-source="${escapeHtml(source.id)}">Delete</button>
+      <span class="inline-actions">
+        <button class="mini-button" type="button" data-ingest-source="${escapeHtml(source.id)}">Ingest</button>
+        <button class="mini-button" type="button" data-schedule-source="${escapeHtml(source.id)}">Schedule</button>
+        <button class="mini-button danger" type="button" data-delete-source="${escapeHtml(source.id)}">Delete</button>
+      </span>
     </div>`)
     .join("");
+}
+
+async function ingestManagedSource(id) {
+  if (!backendApi) return setInputMessage("Backend module is not available.");
+  try {
+    setBusy(true, "Ingesting managed source");
+    const result = await backendApi.ingestManagedSource(id);
+    els.pasteInput.value = result.text || "";
+    if (result.text) runAnalysis(result.text, result.sourceLabel || result.managedSourceName || "Managed source ingest");
+    showToast(`Imported ${result.objectCount ?? result.eventCount ?? 0} items from ${result.managedSourceName || "managed source"}.`);
+    await renderBackendJobs();
+  } catch (error) {
+    setInputMessage(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function scheduleManagedSourceJob(id) {
+  if (!backendApi) return setInputMessage("Backend module is not available.");
+  const source = loadJson(STORAGE_KEYS.sources, []).find((item) => String(item.id) === String(id));
+  try {
+    await backendApi.scheduleManagedSource(id, {
+      name: source ? `${source.name} ingest` : "Managed source ingest",
+      intervalMinutes: Number(els.jobIntervalInput.value || 15)
+    });
+    showToast("Managed source ingest job scheduled.");
+    await renderBackendJobs();
+  } catch (error) {
+    setInputMessage(error.message);
+  }
 }
 
 function deleteSourceConfig(id) {
@@ -2591,10 +2698,15 @@ function deleteSourceConfig(id) {
     title: "Delete source watchlist entry?",
     body: `This removes "${source.name}" from coverage scoring in this browser.`,
     confirmLabel: "Delete Source",
-    onConfirm: () => {
-      saveJson(STORAGE_KEYS.sources, sources.filter((item) => String(item.id) !== String(id)));
-      renderCoverage();
-      showToast("Source watchlist entry deleted.");
+    onConfirm: async () => {
+      try {
+        if (backendApi) await backendApi.deleteSource(id);
+        saveJson(STORAGE_KEYS.sources, sources.filter((item) => String(item.id) !== String(id)));
+        renderCoverage();
+        showToast("Source watchlist entry deleted.");
+      } catch (error) {
+        setInputMessage(error.message);
+      }
     }
   });
 }
@@ -2609,10 +2721,15 @@ function clearSourceConfigs() {
     title: "Clear source watchlist?",
     body: "This removes all expected source definitions used for blind-spot scoring.",
     confirmLabel: "Clear Sources",
-    onConfirm: () => {
-      saveJson(STORAGE_KEYS.sources, []);
-      renderCoverage();
-      showToast("Source watchlist cleared.");
+    onConfirm: async () => {
+      try {
+        if (backendApi) await Promise.all(sources.map((source) => backendApi.deleteSource(source.id)));
+        saveJson(STORAGE_KEYS.sources, []);
+        renderCoverage();
+        showToast("Source watchlist cleared.");
+      } catch (error) {
+        setInputMessage(error.message);
+      }
     }
   });
 }
@@ -2747,18 +2864,23 @@ function applyRuleProfile() {
 
 function applyDetectionPolicy(analysis) {
   const profile = loadJson(STORAGE_KEYS.ruleProfile, "balanced");
+  tuneAnalysisForProfile(analysis, profile, state.records);
+}
+
+function tuneAnalysisForProfile(analysis, profile = "balanced", records = []) {
   analysis.ruleProfile = profile;
   analysis.policySuppressed = 0;
   if (profile !== "focused") {
     analysis.findings = [...analysis.detections, ...(analysis.observations || [])];
-    return;
+    return analysis;
   }
   const before = (analysis.detections || []).length + (analysis.observations || []).length;
   analysis.detections = (analysis.detections || []).filter((detection) => detection.severity === "high" || (detection.confidence || 0) >= 0.65);
   analysis.observations = (analysis.observations || []).filter((observation) => (observation.confidence || 0) >= 0.65 && !observation.tags?.includes("Baseline"));
   analysis.findings = [...analysis.detections, ...analysis.observations];
   analysis.policySuppressed = Math.max(0, before - analysis.findings.length);
-  analysis.entityRisk = buildEntityRisk(state.records, analysis.detections);
+  analysis.entityRisk = buildEntityRisk(records, analysis.detections);
+  return analysis;
 }
 
 function newSetObservations(title, current, previous = [], tactic) {
@@ -2800,12 +2922,16 @@ async function refreshBackendStatus() {
   if (!backendApi) return;
   try {
     const [health, auth, ai] = await Promise.all([backendApi.backendHealth(), backendApi.authConfig(), backendApi.aiConfig()]);
+    state.backend.online = true;
+    state.backend.authMode = health.authMode || auth.authMode || "local-dev";
     const store = health.storeMode === "dynamodb" ? "DynamoDB" : "local store";
     els.backendStatusLabel.textContent = health.awsConfigured ? `Backend ready - ${store}, AWS credentials detected` : `Backend ready - ${store}, AWS credentials missing`;
     renderAiStatus(ai, health.awsConfigured);
     await renderBackendAuth(auth);
     await renderBackendJobs();
   } catch {
+    state.backend.online = false;
+    state.backend.principal = null;
     els.backendStatusLabel.textContent = "Backend offline - run npm start";
     els.authStatusLabel.textContent = "Backend offline";
     els.authRoleLabel.textContent = "Cloud ingest and schedules are unavailable until the backend starts.";
@@ -2833,10 +2959,12 @@ async function renderBackendAuth(auth) {
   els.ssoLoginButton.disabled = !auth.enabled;
   try {
     const { principal } = await backendApi.currentPrincipal();
+    state.backend.principal = principal;
     const roles = principal?.roles?.length ? principal.roles.join(", ") : "viewer";
     els.authStatusLabel.textContent = principal?.authType === "oidc" ? `Signed in as ${principal.name || principal.subject}` : principal?.authType === "api-key" ? "API key session" : "Local admin session";
-    els.authRoleLabel.textContent = `Roles: ${roles}. Admin can delete jobs and export audit; analyst can ingest and run jobs; viewer can inspect.`;
+    els.authRoleLabel.textContent = `Tenant: ${principal?.tenantId || auth.defaultTenant || "default"}. Roles: ${roles}. Admin can delete jobs and export audit; analyst can ingest, export, run AI, and manage cases; viewer can inspect.`;
   } catch {
+    state.backend.principal = null;
     els.authStatusLabel.textContent = auth.enabled ? "SSO required" : "API key required";
     els.authRoleLabel.textContent = auth.enabled ? `Use ${auth.issuer} and mapped groups for access.` : "Save the backend API key to use cloud ingest and schedules.";
   }
@@ -3022,19 +3150,30 @@ function applyAiPromptPreset() {
 }
 
 function buildAiEvidenceContext() {
-  const analysis = state.analysis || {};
-  return {
+  return buildAiEvidenceContextModel({
+    analysis: state.analysis || {},
+    records: state.records,
+    filtered: state.filtered,
     source: state.fileName || "Current browser evidence",
-    workspace: loadJson(STORAGE_KEYS.workspaces, []).find((workspace) => workspace.id === state.activeWorkspaceId)?.name || "",
+    workspaceName: loadJson(STORAGE_KEYS.workspaces, []).find((workspace) => workspace.id === state.activeWorkspaceId)?.name || "",
+    sources: loadJson(STORAGE_KEYS.sources, []),
+    ruleProfile: state.analysis?.ruleProfile || loadJson(STORAGE_KEYS.ruleProfile, "balanced")
+  });
+}
+
+function buildAiEvidenceContextModel({ analysis = {}, records = [], filtered = [], source = "Current browser evidence", workspaceName = "", sources = [], ruleProfile = "balanced" }) {
+  return {
+    source,
+    workspace: workspaceName,
     generatedAt: new Date().toISOString(),
     metrics: {
-      records: state.records.length,
-      filteredRecords: state.filtered.length,
+      records: records.length,
+      filteredRecords: filtered.length,
       detections: analysis.detections?.length || 0,
       observations: analysis.observations?.length || 0,
       highSeverity: (analysis.detections || []).filter((item) => item.severity === "high").length,
-      rejected: state.records.filter((record) => record.action === "REJECT").length,
-      bytes: sumBy(state.records, "bytes")
+      rejected: records.filter((record) => record.action === "REJECT").length,
+      bytes: sumBy(records, "bytes")
     },
     detections: (analysis.detections || []).slice(0, 10).map((detection) => ({
       severity: detection.severity,
@@ -3064,7 +3203,7 @@ function buildAiEvidenceContext() {
     topPorts: (analysis.topPorts || []).slice(0, 8),
     internalPaths: (analysis.internalPaths || []).slice(0, 8),
     externalPaths: (analysis.externalPaths || []).slice(0, 8),
-    sampleRecords: state.filtered.slice(0, 25).map((record) => ({
+    sampleRecords: filtered.slice(0, 25).map((record) => ({
       source: record.source,
       destination: record.destination,
       srcPort: record.srcPort,
@@ -3077,8 +3216,8 @@ function buildAiEvidenceContext() {
       interfaceId: record.interfaceId,
       logStatus: record.logStatus
     })),
-    sources: loadJson(STORAGE_KEYS.sources, []),
-    ruleProfile: analysis.ruleProfile || loadJson(STORAGE_KEYS.ruleProfile, "balanced")
+    sources,
+    ruleProfile: analysis.ruleProfile || ruleProfile
   };
 }
 
@@ -3278,6 +3417,18 @@ function renderPolicyRecommendations() {
 }
 
 async function persistEvidenceIndexedDb(fileName, records, analysis) {
+  if (backendApi) {
+    try {
+      await backendApi.saveEvidenceRun({
+        fileName,
+        recordCount: records.length,
+        records: records.slice(0, 500),
+        analysis
+      });
+    } catch (error) {
+      if (state.backend.online) showToast(`Tenant evidence store skipped: ${error.message}`, "warn");
+    }
+  }
   if (!idbApi?.saveEvidenceRun) return;
   try {
     await idbApi.saveEvidenceRun({ fileName, records, analysis });
@@ -3302,28 +3453,30 @@ function createCaseFromTopDetection() {
 }
 
 async function saveCaseForm() {
-  if (!idbApi?.saveCase) return setInputMessage("Case storage is not available in this browser.");
   const title = els.caseTitleInput.value.trim();
   if (!title) return setInputMessage("Case title is required.");
-  const record = await idbApi.saveCase({
-    id: els.caseIdInput.value || undefined,
-    title,
-    assignee: els.caseAssigneeInput.value.trim() || "Unassigned",
-    status: els.caseStatusInput.value,
-    severity: els.caseSeverityInput.value,
-    notes: els.caseNotesInput.value.trim(),
-    linkedDetection: state.analysis?.detections?.[0]?.id || "",
-    auditAction: els.caseIdInput.value ? "Case updated" : "Case created",
-    auditDetail: title
-  });
-  els.caseIdInput.value = record.id;
-  await refreshCases(record.id);
-  showToast("Case saved.");
+  try {
+    const record = await saveCaseRecord({
+      id: els.caseIdInput.value || undefined,
+      title,
+      assignee: els.caseAssigneeInput.value.trim() || "Unassigned",
+      status: els.caseStatusInput.value,
+      severity: els.caseSeverityInput.value,
+      notes: els.caseNotesInput.value.trim(),
+      linkedDetection: state.analysis?.detections?.[0]?.id || "",
+      auditAction: els.caseIdInput.value ? "Case updated" : "Case created",
+      auditDetail: title
+    });
+    els.caseIdInput.value = record.id;
+    await refreshCases(record.id);
+    showToast("Case saved.");
+  } catch (error) {
+    setInputMessage(error.message);
+  }
 }
 
 async function refreshCases(selectedId = "") {
-  if (!idbApi?.listCases) return;
-  const cases = await idbApi.listCases();
+  const cases = await listCaseRecords();
   els.caseCountLabel.textContent = String(cases.length);
   if (!cases.length) {
     els.caseList.innerHTML = emptyState();
@@ -3348,7 +3501,7 @@ async function refreshCases(selectedId = "") {
 }
 
 async function editCase(id) {
-  const cases = await idbApi.listCases();
+  const cases = await listCaseRecords();
   const item = cases.find((caseItem) => caseItem.id === id);
   if (!item) return;
   els.caseIdInput.value = item.id;
@@ -3366,7 +3519,7 @@ function deleteCaseById(id) {
     body: "This deletes the local case record and appends an audit event. Evidence records are not deleted.",
     confirmLabel: "Delete Case",
     onConfirm: async () => {
-      await idbApi.deleteCase(id);
+      await deleteCaseRecord(id);
       await refreshCases();
       showToast("Case deleted.");
     }
@@ -3374,9 +3527,9 @@ function deleteCaseById(id) {
 }
 
 async function renderCaseAudit(caseId) {
-  if (!idbApi?.listAudit || !caseId) return;
+  if (!caseId) return;
   els.caseAuditTitle.textContent = `Case audit log`;
-  const audit = await idbApi.listAudit(caseId);
+  const audit = await listCaseAuditRecords(caseId);
   if (!audit.length) {
     els.caseAuditList.innerHTML = emptyState();
     return;
@@ -3386,18 +3539,121 @@ async function renderCaseAudit(caseId) {
     .join("");
 }
 
+async function saveCaseRecord(caseRecord) {
+  if (backendApi) {
+    try {
+      return await backendApi.saveCase(caseRecord);
+    } catch (error) {
+      if (state.backend.online) {
+        setInputMessage(`Case was not saved to the tenant store: ${error.message}`);
+        throw error;
+      }
+    }
+  }
+  if (!idbApi?.saveCase) throw new Error("Case storage is not available in this browser.");
+  return idbApi.saveCase(caseRecord);
+}
+
+async function listCaseRecords() {
+  if (backendApi) {
+    try {
+      return await backendApi.listCases();
+    } catch (error) {
+      if (state.backend.online) {
+        setInputMessage(`Case list unavailable: ${error.message}`);
+        return [];
+      }
+    }
+  }
+  return idbApi?.listCases ? idbApi.listCases() : [];
+}
+
+async function deleteCaseRecord(id) {
+  if (backendApi) return backendApi.deleteCase(id);
+  if (!idbApi?.deleteCase) throw new Error("Case storage is not available in this browser.");
+  return idbApi.deleteCase(id);
+}
+
+async function listCaseAuditRecords(caseId) {
+  if (backendApi) {
+    try {
+      return await backendApi.listCaseAudit(caseId);
+    } catch (error) {
+      if (state.backend.online) return [];
+    }
+  }
+  return idbApi?.listAudit ? idbApi.listAudit(caseId) : [];
+}
+
 function renderTopology() {
   if (!topologyApi?.buildTopology) return;
   if (!state.records.length) {
     els.topologyCanvas.innerHTML = emptyState();
+    if (els.replayEventList) els.replayEventList.innerHTML = emptyState();
     return;
   }
-  const times = state.records.map((record) => record.start).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
-  const pct = Number(els.replayRangeInput.value || 100) / 100;
-  const cutoff = times.length ? times[Math.min(times.length - 1, Math.floor((times.length - 1) * pct))] : Infinity;
-  const topology = topologyApi.buildTopology(state.records, cutoff);
+  const replay = buildTopologyReplaySnapshot(state.records, Number(els.replayRangeInput.value || 100));
+  const topology = topologyApi.buildTopology(state.records, replay.cutoff);
   els.topologyCanvas.innerHTML = topologyApi.renderTopologySvg(topology);
-  els.replayTimeLabel.textContent = pct >= 1 ? "All evidence" : `Replay through ${formatDate(cutoff)}`;
+  els.replayTimeLabel.textContent = replay.percent >= 100 ? "All evidence" : `Replay through ${formatDate(replay.cutoff)}`;
+  if (els.replayEventCountLabel) {
+    els.replayEventCountLabel.textContent = `${formatNumber(replay.includedRecords.length)} of ${formatNumber(state.records.length)} records`;
+  }
+  if (els.replayEventList) {
+    els.replayEventList.innerHTML = replay.recentRecords.length
+      ? replay.recentRecords
+          .map(
+            (record) => `<div class="issue-item">
+              <strong>${escapeHtml(formatDate(record.start))} ${escapeHtml(record.action)}</strong>
+              <span class="mono">${escapeHtml(formatEndpoint(record.source, record.srcPort))} -> ${escapeHtml(formatEndpoint(record.destination, record.dstPort))}</span>
+              <span>${escapeHtml(record.protocol)} ${escapeHtml(formatBytes(record.bytes))} ${escapeHtml(record.interfaceId || "")}</span>
+            </div>`
+          )
+          .join("")
+      : emptyState();
+  }
+}
+
+function buildTopologyReplaySnapshot(records, percent = 100) {
+  const normalizedPercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const timed = records.filter((record) => Number.isFinite(record.start)).sort((a, b) => a.start - b.start);
+  if (!timed.length) {
+    return { percent: normalizedPercent, cutoff: Infinity, includedRecords: records, recentRecords: records.slice(-8).reverse() };
+  }
+  const index = Math.min(timed.length - 1, Math.max(0, Math.floor((timed.length - 1) * (normalizedPercent / 100))));
+  const cutoff = normalizedPercent >= 100 ? Infinity : timed[index].start;
+  const includedRecords = records.filter((record) => !Number.isFinite(record.start) || record.start <= cutoff);
+  return {
+    percent: normalizedPercent,
+    cutoff,
+    includedRecords,
+    recentRecords: includedRecords
+      .filter((record) => Number.isFinite(record.start))
+      .sort((a, b) => b.start - a.start)
+      .slice(0, 8)
+  };
+}
+
+function toggleTopologyReplay() {
+  if (state.replayTimer) {
+    window.clearInterval(state.replayTimer);
+    state.replayTimer = null;
+    els.playReplayButton.textContent = "Play";
+    return;
+  }
+  els.playReplayButton.textContent = "Pause";
+  state.replayTimer = window.setInterval(() => {
+    const next = Number(els.replayRangeInput.value || 0) + 5;
+    els.replayRangeInput.value = next >= 100 ? 100 : next;
+    renderTopology();
+    if (next >= 100) toggleTopologyReplay();
+  }, 700);
+}
+
+function stepTopologyReplay(delta) {
+  const next = Math.max(0, Math.min(100, Number(els.replayRangeInput.value || 100) + delta));
+  els.replayRangeInput.value = String(next);
+  renderTopology();
 }
 
 function updateStatus() {
@@ -3420,38 +3676,66 @@ async function exportInvestigationPackage() {
     setInputMessage("Analyze evidence before exporting an investigation package.");
     return;
   }
-  const cases = idbApi?.listCases ? await idbApi.listCases() : [];
+  const cases = await listCaseRecords();
   const workspaces = loadJson(STORAGE_KEYS.workspaces, []);
   const workspace = workspaces.find((item) => item.id === state.activeWorkspaceId) || null;
-  const packageBody = {
-    product: "SignalPrism NDR",
-    exportedAt: new Date().toISOString(),
-    workspace: workspace ? packageWorkspace(workspace) : null,
+  let packageBody = buildInvestigationPackageModel({
+    analysis: state.analysis,
+    records: state.records,
+    filtered: state.filtered,
+    workspace,
     source: state.fileName,
-    summary: {
-      records: state.records.length,
-      filteredRecords: state.filtered.length,
-      detections: state.analysis.detections.length,
-      observations: state.analysis.observations?.length || 0,
-      highSeverity: state.analysis.detections.filter((detection) => detection.severity === "high").length,
-      entities: state.analysis.entityRisk.length,
-      bytes: state.analysis.totals.bytes,
-      timeRange: state.analysis.timeRange,
-      ruleProfile: state.analysis.ruleProfile || loadJson(STORAGE_KEYS.ruleProfile, "balanced")
-    },
-    detections: state.analysis.detections.map(packageDetection),
-    observations: (state.analysis.observations || []).map(packageDetection),
-    priorityEntities: state.analysis.entityRisk.slice(0, 25),
-    paths: {
-      internal: state.analysis.internalPaths.slice(0, 25),
-      external: state.analysis.externalPaths.slice(0, 25)
-    },
     sources: loadJson(STORAGE_KEYS.sources, []),
     hunts: loadJson(STORAGE_KEYS.hunts, []),
     cases,
     analystSummary: els.analystSummary.textContent.trim(),
-    aiAnswer: els.aiAnswerPanel.textContent.trim(),
-    records: state.filtered.slice(0, 500).map((record) => ({
+    aiAnswer: els.aiAnswerPanel.textContent.trim()
+  });
+  if (backendApi) {
+    try {
+      packageBody = await backendApi.exportInvestigationPackage(packageBody);
+    } catch (error) {
+      if (state.backend.online) {
+        setInputMessage(`Export blocked by backend policy: ${error.message}`);
+        return;
+      }
+    }
+  }
+  const slug = (workspace?.name || state.fileName || "signalprism-investigation").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+  downloadText(`${slug || "signalprism-investigation"}-package.json`, JSON.stringify(packageBody, null, 2), "application/json");
+  showToast("Investigation package exported.");
+}
+
+function buildInvestigationPackageModel({ analysis, records = [], filtered = [], workspace = null, source = "", sources = [], hunts = [], cases = [], analystSummary = "", aiAnswer = "" }) {
+  return {
+    product: "SignalPrism NDR",
+    exportedAt: new Date().toISOString(),
+    workspace: workspace ? packageWorkspace(workspace) : null,
+    source,
+    summary: {
+      records: records.length,
+      filteredRecords: filtered.length,
+      detections: analysis?.detections?.length || 0,
+      observations: analysis?.observations?.length || 0,
+      highSeverity: (analysis?.detections || []).filter((detection) => detection.severity === "high").length,
+      entities: analysis?.entityRisk?.length || 0,
+      bytes: analysis?.totals?.bytes || 0,
+      timeRange: analysis?.timeRange || null,
+      ruleProfile: analysis?.ruleProfile || "balanced"
+    },
+    detections: (analysis?.detections || []).map(packageDetection),
+    observations: (analysis?.observations || []).map(packageDetection),
+    priorityEntities: (analysis?.entityRisk || []).slice(0, 25),
+    paths: {
+      internal: (analysis?.internalPaths || []).slice(0, 25),
+      external: (analysis?.externalPaths || []).slice(0, 25)
+    },
+    sources,
+    hunts,
+    cases,
+    analystSummary,
+    aiAnswer,
+    records: filtered.slice(0, 500).map((record) => ({
       source: record.source,
       destination: record.destination,
       srcPort: record.srcPort,
@@ -3466,9 +3750,6 @@ async function exportInvestigationPackage() {
       logStatus: record.logStatus
     }))
   };
-  const slug = (workspace?.name || state.fileName || "signalprism-investigation").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-  downloadText(`${slug || "signalprism-investigation"}-package.json`, JSON.stringify(packageBody, null, 2), "application/json");
-  showToast("Investigation package exported.");
 }
 
 function packageDetection(detection) {
@@ -3808,6 +4089,10 @@ if (typeof module !== "undefined") {
   module.exports = {
     parseVpcFlowLog,
     analyzeRecords,
+    tuneAnalysisForProfile,
+    buildAiEvidenceContextModel,
+    buildInvestigationPackageModel,
+    buildTopologyReplaySnapshot,
     SAMPLE_LOG
   };
 }

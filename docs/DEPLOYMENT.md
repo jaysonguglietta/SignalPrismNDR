@@ -131,6 +131,8 @@ NDR_DDB_TABLE=<table>
 
 Enable point-in-time recovery and server-side encryption. Terraform does this by default.
 
+DynamoDB stores tenant-scoped workspaces, cases, evidence-run metadata, managed sources, jobs, runs, and audit records. Configure `NDR_DEFAULT_TENANT` for API-key deployments and `NDR_TENANT_CLAIM` for OIDC deployments.
+
 ## Bedrock Deployment
 
 Keep disabled unless approved:
