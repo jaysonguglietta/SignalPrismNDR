@@ -435,6 +435,19 @@ select {
   margin-top: 8px;
 }
 
+.job-run-list {
+  margin: 8px 0 0;
+}
+
+.job-run-status {
+  padding: 4px 16px 16px;
+}
+
+select[multiple] {
+  min-height: 112px;
+  padding: 8px;
+}
+
 .section-heading {
   display: flex;
   align-items: center;

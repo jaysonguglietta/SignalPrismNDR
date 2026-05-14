@@ -112,6 +112,7 @@
             <button class="tab" id="coverageTab" type="button" role="tab" aria-selected="false" aria-controls="coveragePanel" data-tab="coverage">Coverage</button>
             <button class="tab" id="pipelineTab" type="button" role="tab" aria-selected="false" aria-controls="pipelinePanel" data-tab="pipeline">Pipeline</button>
             <button class="tab" id="casesTab" type="button" role="tab" aria-selected="false" aria-controls="casesPanel" data-tab="cases">Cases</button>
+            <button class="tab" id="adminTab" type="button" role="tab" aria-selected="false" aria-controls="adminPanel" data-tab="admin">Admin</button>
             <button class="tab" id="topologyTab" type="button" role="tab" aria-selected="false" aria-controls="topologyPanel" data-tab="topology">Topology</button>
             <button class="tab" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsPanel" data-tab="reports">Reports</button>
           </nav>
@@ -508,6 +509,13 @@
                   </div>
                 </div>
                 <div class="rank-list" id="backendJobsList"></div>
+                <div class="job-run-status">
+                  <div class="section-heading">
+                    <span>Async job status</span>
+                    <span>CloudWatch/S3 imports</span>
+                  </div>
+                  <div class="quality-list job-run-list" id="backendJobRunsList"></div>
+                </div>
               </article>
 
               <article class="panel">
@@ -593,6 +601,73 @@
                   </div>
                 </div>
                 <div class="quality-list" id="caseAuditList"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="adminPanel" role="tabpanel" aria-labelledby="adminTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Tenant access</p>
+                    <h2>Users and roles</h2>
+                  </div>
+                  <button class="ghost-button compact" id="saveTenantUserButton" type="button">Save User</button>
+                </div>
+                <div class="tool-body">
+                  <input id="adminUserIdInput" type="hidden">
+                  <label class="field-label" for="adminUserNameInput">Name</label>
+                  <input id="adminUserNameInput" type="text" placeholder="Avery SOC">
+                  <label class="field-label" for="adminUserEmailInput">Email</label>
+                  <input id="adminUserEmailInput" type="email" placeholder="avery@example.com">
+                  <label class="field-label" for="adminUserRoleInput">Role</label>
+                  <select id="adminUserRoleInput">
+                    <option value="analyst">Analyst</option>
+                    <option value="admin">Admin</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                  <label class="field-label" for="adminUserStatusInput">Status</label>
+                  <select id="adminUserStatusInput">
+                    <option value="active">Active</option>
+                    <option value="invited">Invited</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                  <label class="field-label" for="adminUserSourceInput">Source ownership</label>
+                  <select id="adminUserSourceInput" multiple size="4"></select>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Tenant roster</p>
+                    <h2 id="adminTenantLabel">Backend session required</h2>
+                  </div>
+                  <span class="severity-count" id="adminUserCountLabel">0</span>
+                </div>
+                <div class="entity-list" id="adminUserList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Source ownership</p>
+                    <h2>Managed source owners</h2>
+                  </div>
+                  <button class="ghost-button compact" id="assignSourceOwnerButton" type="button">Assign</button>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <label class="field-label" for="sourceOwnerSourceInput">Source</label>
+                    <select id="sourceOwnerSourceInput"></select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="sourceOwnerUserInput">Owner</label>
+                    <select id="sourceOwnerUserInput"></select>
+                  </div>
+                </div>
+                <div class="quality-list" id="sourceOwnershipList"></div>
               </article>
             </div>
           </section>

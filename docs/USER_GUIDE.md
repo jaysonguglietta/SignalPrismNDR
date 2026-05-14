@@ -37,6 +37,8 @@ The `Investigation` panel stores repeatable workspaces. With the backend running
 - Enrichment.
 - Rule profile.
 
+When the backend is available, saved evidence runs also create a raw evidence package. Local mode stores package JSON under `.ndr-data/evidence-packages/`; S3 mode stores package JSON in the configured evidence bucket with retention metadata.
+
 Controls:
 
 - `New`: starts a draft workspace.
@@ -149,6 +151,7 @@ For direct ingest from source inventory:
 - Use a CloudWatch source with a `/aws/...` log group in scope.
 - Use an S3 source with a scope like `s3://bucket/AWSLogs/account/vpcflowlogs/`.
 - Select `Ingest` on the source entry to pull evidence immediately.
+- Select `Async` to start a long-running import and continue working while status updates arrive.
 - Select `Schedule` to create a recurring backend ingest job from the source.
 
 ## Enrichment
@@ -197,6 +200,8 @@ Create a scheduled job from the `Pipeline` tab:
 
 Admins can delete jobs. Admins and analysts can run jobs manually.
 
+Use `Async` on a scheduled job to queue a background CloudWatch or S3 import. The job status list shows queued, running, completed, and failed runs. SignalPrism polls the backend and shows a toast when an async import completes or fails.
+
 ## Cases
 
 Open `Cases` to create or update investigation records.
@@ -210,6 +215,19 @@ Fields:
 - Notes.
 
 Case audit history is saved in the tenant store when the backend is available, with IndexedDB as local fallback. Viewers can read cases; analysts and admins can create or update them; only admins can delete.
+
+## Tenant Admin
+
+Open `Admin` to manage the tenant roster and source ownership. This screen requires the backend and an `admin` role.
+
+Admins can:
+
+- Add or update tenant users with `admin`, `analyst`, or `viewer` roles.
+- Mark users active or suspended.
+- Associate users with managed sources.
+- Assign or clear ownership for CloudWatch and S3 source inventory entries.
+
+This roster documents SignalPrism ownership and access intent. It does not modify your identity provider; SSO group membership remains managed in the IdP.
 
 ## Topology Replay
 
@@ -256,3 +274,5 @@ Supported exports:
 Use redacted exports when sharing evidence outside the security team.
 
 The investigation package includes workspace metadata, summary counts, detections, observations, top entities, topology paths, managed sources, saved hunts, cases, summaries, AI answer text, and a bounded record sample. When the backend is running, package export is RBAC-controlled and audited.
+
+Raw evidence package storage is separate from the downloadable investigation package. It preserves the full raw upload or import payload for retained evidence handling, while analyst exports stay bounded and redacted when needed.

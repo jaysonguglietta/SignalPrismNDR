@@ -46,6 +46,19 @@ Parser issues are non-fatal. They include:
 
 The import quality panel surfaces skipped rows so analysts can assess evidence completeness.
 
+## Evidence Package Model
+
+Evidence-run metadata stays bounded for fast UI and API reads. When the backend saves an evidence run or completes a CloudWatch/S3 import, it also writes a full raw evidence package containing:
+
+- Package and tenant identifiers.
+- Source label and creation time.
+- Retention deadline and retention days.
+- Raw evidence text.
+- Bounded normalized record sample.
+- Analysis summary.
+
+Local mode stores package JSON under `.ndr-data/evidence-packages/<tenant>/`. Production mode can store packages in S3 with Object Lock retention.
+
 ## Detection Categories
 
 ### Sensitive-Port Probing
@@ -161,6 +174,8 @@ Enrichment is stored in browser storage and can be included in tenant workspace 
 - Redacted JSON for privacy-aware sharing.
 - Investigation package JSON for complete case handoff. Backend-enabled exports are RBAC-controlled and audited.
 - Backend audit NDJSON.
+
+The raw evidence package is not the same as the analyst investigation package. Evidence packages are retention-oriented source artifacts; investigation packages are bounded handoff artifacts.
 
 ## Analyst Guidance
 

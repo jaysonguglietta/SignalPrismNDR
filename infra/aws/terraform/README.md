@@ -10,7 +10,8 @@ This Terraform module provisions a production-oriented AWS path for SignalPrism 
 - Secrets Manager secrets for `NDR_API_KEY` and optional OIDC client secret
 - CloudWatch Logs with configurable retention
 - S3 audit bucket with versioning, public access block, encryption, and Object Lock COMPLIANCE retention
-- Least-privilege task IAM for S3 flow log read, CloudWatch Logs ingest read, DynamoDB persistence, EFS, Bedrock model invocation, and audit exports
+- S3 evidence package bucket with versioning, public access block, encryption, and configurable Object Lock retention
+- Least-privilege task IAM for S3 flow log read, CloudWatch Logs ingest read, DynamoDB persistence, evidence package writes, EFS, Bedrock model invocation, and audit exports
 
 ## Deployment Flow
 
@@ -39,13 +40,25 @@ terraform apply \
 
 ## Persistence
 
-Production defaults to `NDR_STORE=dynamodb`. Local JSON persistence remains available for development, but DynamoDB should be used for shared environments because it survives task replacement and supports point-in-time recovery. Tenant-scoped objects use `TENANT#<tenantId>#<kind>` partitions.
+Production defaults to `NDR_STORE=dynamodb`. Local JSON persistence remains available for development, but DynamoDB should be used for shared environments because it survives task replacement and supports point-in-time recovery. Tenant-scoped objects use `TENANT#<tenantId>#<kind>` partitions for workspaces, cases, evidence metadata, managed sources, tenant users, and async job runs.
 
-EFS is still mounted for larger local evidence scratch data and future IndexedDB/API evidence migration work. It is encrypted at rest and mounted with an access point.
+EFS is still mounted for local scratch data and fallback package storage. It is encrypted at rest and mounted with an access point.
 
 ## Audit Retention
 
 The app writes append-only audit records with a `retentionUntil` timestamp. The infrastructure also creates an S3 audit bucket with Object Lock COMPLIANCE mode for immutable audit exports. Choose `audit_retention_days` to match your retention policy before production use; reducing Object Lock retention later may not be possible for locked objects.
+
+## Evidence Package Retention
+
+The app writes full raw evidence packages to the evidence bucket when `NDR_EVIDENCE_BUCKET` is configured. Terraform creates that bucket with Object Lock enabled, versioning, public access block, and SSE-S3 encryption. The task receives:
+
+- `NDR_EVIDENCE_BUCKET`
+- `NDR_EVIDENCE_PREFIX`
+- `NDR_EVIDENCE_REGION`
+- `NDR_EVIDENCE_RETENTION_DAYS`
+- `NDR_EVIDENCE_OBJECT_LOCK_MODE`
+
+Choose `evidence_retention_days` and `evidence_object_lock_mode` before production use. `GOVERNANCE` is the default; `COMPLIANCE` should be reserved for environments where immutable retention policy has been formally approved.
 
 ## Security Notes
 
@@ -55,5 +68,6 @@ The app writes append-only audit records with a `retentionUntil` timestamp. The 
 - Map IdP groups to `admin`, `analyst`, and `viewer` with `admin_group`, `analyst_group`, and `viewer_group`.
 - Set `tenant_claim` to the OIDC claim that identifies the tenant or organization boundary.
 - Use task roles rather than static AWS keys in production.
+- Confirm evidence and audit retention settings before storing regulated evidence.
 - Leave `bedrock_enabled=false` unless the environment is approved for AI-assisted analysis.
 - Scope `bedrock_model_arns` to approved foundation model or inference profile ARNs instead of `*`.

@@ -129,6 +129,8 @@ const STORAGE_KEYS = {
   baseline: "ndrFlowConsole.baseline.v1",
   hunts: "ndrFlowConsole.hunts.v1",
   sources: "ndrFlowConsole.sources.v1",
+  tenantUsers: "ndrFlowConsole.tenantUsers.v1",
+  seenJobRuns: "ndrFlowConsole.seenJobRuns.v1",
   enrichment: "ndrFlowConsole.enrichment.v1"
 };
 
@@ -152,12 +154,14 @@ const state = {
   fields: [],
   errors: [],
   fileName: "",
+  rawEvidenceText: "",
   enrichment: {},
   activeWorkspaceId: "",
   selectedEntity: null,
   huntResults: [],
   sort: { field: "start", direction: "desc" },
   backend: { online: false, authMode: "local-dev", principal: null },
+  jobRunPoller: null,
   replayTimer: null,
   pendingConfirm: null
 };
@@ -273,6 +277,7 @@ function cacheElements() {
     "jobIntervalInput",
     "createJobButton",
     "backendJobsList",
+    "backendJobRunsList",
     "applicationMix",
     "dropAcceptedDns",
     "dropNoData",
@@ -308,6 +313,20 @@ function cacheElements() {
     "caseList",
     "caseAuditTitle",
     "caseAuditList",
+    "adminTenantLabel",
+    "adminUserIdInput",
+    "adminUserNameInput",
+    "adminUserEmailInput",
+    "adminUserRoleInput",
+    "adminUserStatusInput",
+    "adminUserSourceInput",
+    "saveTenantUserButton",
+    "adminUserCountLabel",
+    "adminUserList",
+    "sourceOwnerSourceInput",
+    "sourceOwnerUserInput",
+    "assignSourceOwnerButton",
+    "sourceOwnershipList",
     "topologyCanvas",
     "playReplayButton",
     "stepReplayBackButton",
@@ -458,9 +477,11 @@ function wireEvents() {
   els.sourceWatchlist.addEventListener("click", (event) => {
     const deleteButton = event.target.closest("[data-delete-source]");
     const ingestButton = event.target.closest("[data-ingest-source]");
+    const ingestAsyncButton = event.target.closest("[data-ingest-source-async]");
     const scheduleButton = event.target.closest("[data-schedule-source]");
     if (deleteButton) deleteSourceConfig(deleteButton.dataset.deleteSource);
     if (ingestButton) ingestManagedSource(ingestButton.dataset.ingestSource);
+    if (ingestAsyncButton) ingestManagedSourceAsync(ingestAsyncButton.dataset.ingestSourceAsync);
     if (scheduleButton) scheduleManagedSourceJob(scheduleButton.dataset.scheduleSource);
   });
   els.saveBaselineButton.addEventListener("click", saveCurrentBaseline);
@@ -497,10 +518,20 @@ function wireEvents() {
   els.createJobButton.addEventListener("click", createIngestJob);
   els.backendJobsList.addEventListener("click", (event) => {
     const run = event.target.closest("[data-run-job]");
+    const asyncRun = event.target.closest("[data-run-job-async]");
     const del = event.target.closest("[data-delete-job]");
     if (run) runBackendJob(run.dataset.runJob);
+    if (asyncRun) runBackendJobAsync(asyncRun.dataset.runJobAsync);
     if (del) deleteBackendJob(del.dataset.deleteJob);
   });
+  els.saveTenantUserButton.addEventListener("click", saveTenantUser);
+  els.adminUserList.addEventListener("click", (event) => {
+    const edit = event.target.closest("[data-edit-tenant-user]");
+    const del = event.target.closest("[data-delete-tenant-user]");
+    if (edit) editTenantUser(edit.dataset.editTenantUser);
+    if (del) deleteTenantUser(del.dataset.deleteTenantUser);
+  });
+  els.assignSourceOwnerButton.addEventListener("click", assignSourceOwner);
   els.createCaseFromTopDetectionButton.addEventListener("click", createCaseFromTopDetection);
   els.saveCaseButton.addEventListener("click", saveCaseForm);
   els.caseList.addEventListener("click", (event) => {
@@ -532,6 +563,7 @@ function activateTab(tabName) {
     panel.classList.toggle("active", isActive);
     panel.hidden = !isActive;
   });
+  if (tabName === "admin") renderTenantAdmin();
 }
 
 function clearCurrentEvidence() {
@@ -541,6 +573,7 @@ function clearCurrentEvidence() {
   state.fields = [];
   state.errors = [];
   state.fileName = "";
+  state.rawEvidenceText = "";
   state.selectedEntity = null;
   state.huntResults = [];
   els.fileInput.value = "";
@@ -603,6 +636,9 @@ async function initializePersistentData() {
     await refreshServerWorkspaces();
     await refreshManagedSourcesFromBackend();
     await refreshCases();
+    await refreshTenantUsersFromBackend();
+    await refreshJobRuns(true);
+    startJobRunPolling();
   } catch (error) {
     showToast(`Module initialization warning: ${error.message}`, "warn");
   }
@@ -866,6 +902,7 @@ function runAnalysis(text, fileName) {
     state.fields = parsed.fields;
     state.errors = parsed.errors;
     state.fileName = fileName;
+    state.rawEvidenceText = text;
     state.analysis = analyzeRecords(parsed.records, parsed.errors);
     enrichAnalysis(state.analysis);
     applyBaselineObservations(state.analysis);
@@ -2608,6 +2645,8 @@ async function saveSourceConfig() {
     account: els.sourceAccountInput.value.trim(),
     region: els.sourceRegionInput.value.trim(),
     scope,
+    ownerUserId: sources[existingIndex]?.ownerUserId || "",
+    ownerName: sources[existingIndex]?.ownerName || "",
     createdAt: sources[existingIndex]?.createdAt || new Date().toISOString()
   };
   let saved = item;
@@ -2649,9 +2688,11 @@ function renderSourceWatchlist(sources) {
     .map((source) => `<div class="issue-item">
       <strong>${escapeHtml(source.name)}</strong>
       <span>${escapeHtml([source.type, source.account, source.region].filter(Boolean).join(" - ") || "Managed source")}</span>
+      <span>${escapeHtml(source.ownerName ? `Owner: ${source.ownerName}` : "Owner: unassigned")}</span>
       <span>${escapeHtml(source.scope.join(", "))}</span>
       <span class="inline-actions">
         <button class="mini-button" type="button" data-ingest-source="${escapeHtml(source.id)}">Ingest</button>
+        <button class="mini-button" type="button" data-ingest-source-async="${escapeHtml(source.id)}">Async</button>
         <button class="mini-button" type="button" data-schedule-source="${escapeHtml(source.id)}">Schedule</button>
         <button class="mini-button danger" type="button" data-delete-source="${escapeHtml(source.id)}">Delete</button>
       </span>
@@ -2672,6 +2713,18 @@ async function ingestManagedSource(id) {
     setInputMessage(error.message);
   } finally {
     setBusy(false);
+  }
+}
+
+async function ingestManagedSourceAsync(id) {
+  if (!backendApi) return setInputMessage("Backend module is not available.");
+  try {
+    const run = await backendApi.ingestManagedSourceAsync(id);
+    showToast(`Async ingest started for ${run.jobName || "managed source"}.`);
+    await refreshJobRuns();
+    activateTab("pipeline");
+  } catch (error) {
+    setInputMessage(error.message);
   }
 }
 
@@ -2929,9 +2982,16 @@ async function refreshBackendStatus() {
     renderAiStatus(ai, health.awsConfigured);
     await renderBackendAuth(auth);
     await renderBackendJobs();
+    if (state.backend.principal) {
+      await refreshJobRuns(true);
+      startJobRunPolling();
+    } else {
+      stopJobRunPolling();
+    }
   } catch {
     state.backend.online = false;
     state.backend.principal = null;
+    stopJobRunPolling();
     els.backendStatusLabel.textContent = "Backend offline - run npm start";
     els.authStatusLabel.textContent = "Backend offline";
     els.authRoleLabel.textContent = "Cloud ingest and schedules are unavailable until the backend starts.";
@@ -3071,6 +3131,7 @@ async function renderBackendJobs() {
           <span class="rank-value">
             ${escapeHtml(job.lastStatus || "never")}
             <button class="mini-button" type="button" data-run-job="${escapeHtml(job.id)}">Run</button>
+            <button class="mini-button" type="button" data-run-job-async="${escapeHtml(job.id)}">Async</button>
             <button class="mini-button danger" type="button" data-delete-job="${escapeHtml(job.id)}">Delete</button>
           </span>
           <div class="rank-bar"><span style="width:${job.enabled ? 100 : 8}%"></span></div>
@@ -3082,12 +3143,78 @@ async function renderBackendJobs() {
   }
 }
 
+async function refreshJobRuns(silent = false) {
+  if (!backendApi || !els.backendJobRunsList) return;
+  try {
+    const runs = await backendApi.listJobRuns();
+    renderJobRuns(runs);
+    notifyCompletedJobRuns(runs, silent);
+  } catch (error) {
+    if (!silent && state.backend.online) els.backendJobRunsList.innerHTML = `<div class="empty-state"><strong>Job status unavailable</strong><span>${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+function renderJobRuns(runs = []) {
+  if (!els.backendJobRunsList) return;
+  if (!runs.length) {
+    els.backendJobRunsList.innerHTML = emptyState();
+    return;
+  }
+  els.backendJobRunsList.innerHTML = runs
+    .slice(0, 8)
+    .map((run) => {
+      const pct = Math.max(4, Math.min(100, Number(run.progress || 0)));
+      return `<div class="rank-item">
+        <span class="rank-label">${escapeHtml(run.jobName || "Async ingest")}</span>
+        <span class="rank-value">${escapeHtml(run.status)} - ${escapeHtml(run.message || "")}</span>
+        <div class="rank-bar"><span style="width:${pct}%"></span></div>
+      </div>`;
+    })
+    .join("");
+}
+
+function notifyCompletedJobRuns(runs = [], silent = false) {
+  const seen = loadJson(STORAGE_KEYS.seenJobRuns, {});
+  let changed = false;
+  runs.forEach((run) => {
+    if (!["completed", "failed"].includes(run.status) || seen[run.id] === run.status) return;
+    seen[run.id] = run.status;
+    changed = true;
+    if (!silent) {
+      showToast(run.status === "completed" ? `${run.jobName || "Async ingest"} completed.` : `${run.jobName || "Async ingest"} failed: ${run.message || "Unknown error"}`, run.status === "completed" ? "success" : "warn");
+    }
+  });
+  if (changed) saveJson(STORAGE_KEYS.seenJobRuns, seen);
+}
+
+function startJobRunPolling() {
+  stopJobRunPolling();
+  if (!backendApi) return;
+  state.jobRunPoller = window.setInterval(() => refreshJobRuns(false), 10000);
+}
+
+function stopJobRunPolling() {
+  if (!state.jobRunPoller) return;
+  window.clearInterval(state.jobRunPoller);
+  state.jobRunPoller = null;
+}
+
 async function runBackendJob(id) {
   try {
     const result = await backendApi.runJob(id);
     els.pasteInput.value = result.text || "";
     if (result.text) runAnalysis(result.text, result.sourceLabel || "Scheduled ingest");
     await renderBackendJobs();
+  } catch (error) {
+    setInputMessage(error.message);
+  }
+}
+
+async function runBackendJobAsync(id) {
+  try {
+    const run = await backendApi.runJobAsync(id);
+    showToast(`Async ingest started for ${run.jobName || "job"}.`);
+    await refreshJobRuns();
   } catch (error) {
     setInputMessage(error.message);
   }
@@ -3423,6 +3550,7 @@ async function persistEvidenceIndexedDb(fileName, records, analysis) {
         fileName,
         recordCount: records.length,
         records: records.slice(0, 500),
+        rawEvidenceText: state.rawEvidenceText,
         analysis
       });
     } catch (error) {
@@ -3583,6 +3711,162 @@ async function listCaseAuditRecords(caseId) {
     }
   }
   return idbApi?.listAudit ? idbApi.listAudit(caseId) : [];
+}
+
+async function refreshTenantUsersFromBackend() {
+  if (!backendApi) return;
+  try {
+    const users = await backendApi.listTenantUsers();
+    saveJson(STORAGE_KEYS.tenantUsers, users);
+    renderTenantAdmin();
+  } catch (error) {
+    if (state.backend.online && hasRole("admin")) showToast(`Tenant admin sync unavailable: ${error.message}`, "warn");
+  }
+}
+
+function renderTenantAdmin() {
+  if (!els.adminTenantLabel) return;
+  const users = loadJson(STORAGE_KEYS.tenantUsers, []);
+  const sources = loadJson(STORAGE_KEYS.sources, []);
+  const principal = state.backend.principal;
+  const canAdmin = hasRole("admin");
+  els.adminTenantLabel.textContent = principal ? `Tenant ${principal.tenantId || "default"} - ${principal.roles?.join(", ") || "viewer"}` : "Backend session required";
+  els.adminUserCountLabel.textContent = String(users.length);
+  renderAdminSourceOptions(users, sources);
+  [els.adminUserNameInput, els.adminUserEmailInput, els.adminUserRoleInput, els.adminUserStatusInput, els.adminUserSourceInput, els.sourceOwnerSourceInput, els.sourceOwnerUserInput].forEach((control) => {
+    if (control) control.disabled = !canAdmin;
+  });
+  els.saveTenantUserButton.disabled = !canAdmin;
+  els.assignSourceOwnerButton.disabled = !canAdmin;
+  if (!state.backend.online || !principal) {
+    els.adminUserList.innerHTML = `<div class="empty-state"><strong>Backend session required</strong><span>Start the backend and sign in with an admin role to manage tenant access.</span></div>`;
+    els.sourceOwnershipList.innerHTML = emptyState();
+    return;
+  }
+  if (!canAdmin) {
+    els.adminUserList.innerHTML = `<div class="empty-state"><strong>Admin role required</strong><span>Your current role can view tenant data in other tabs, but cannot manage users or source ownership.</span></div>`;
+    els.sourceOwnershipList.innerHTML = emptyState();
+    return;
+  }
+  els.adminUserList.innerHTML = users.length
+    ? users
+        .map((user) => `<article class="entity-card">
+          <div class="entity-name">${escapeHtml(user.name || user.email)}</div>
+          <div class="risk-score ${user.role === "admin" ? "high" : user.role === "analyst" ? "medium" : ""}">${escapeHtml(user.role[0].toUpperCase())}</div>
+          <div class="entity-meta">
+            <span class="tag">${escapeHtml(user.email)}</span>
+            <span class="tag">${escapeHtml(user.status || "active")}</span>
+            <button class="mini-button" type="button" data-edit-tenant-user="${escapeHtml(user.id)}">Edit</button>
+            <button class="mini-button danger" type="button" data-delete-tenant-user="${escapeHtml(user.id)}">Delete</button>
+          </div>
+        </article>`)
+        .join("")
+    : `<div class="empty-state"><strong>No tenant users</strong><span>Add analysts, viewers, or admins to document ownership.</span></div>`;
+  els.sourceOwnershipList.innerHTML = sources.length
+    ? sources
+        .map((source) => `<div class="issue-item">
+          <strong>${escapeHtml(source.name)}</strong>
+          <span>${escapeHtml(source.ownerName || "Unassigned")}</span>
+          <span>${escapeHtml([source.type, source.region].filter(Boolean).join(" - "))}</span>
+        </div>`)
+        .join("")
+    : emptyState();
+}
+
+function renderAdminSourceOptions(users, sources) {
+  if (!els.adminUserSourceInput || !els.sourceOwnerSourceInput || !els.sourceOwnerUserInput) return;
+  els.adminUserSourceInput.innerHTML = sources.map((source) => `<option value="${escapeHtml(source.id)}">${escapeHtml(source.name)}</option>`).join("");
+  els.sourceOwnerSourceInput.innerHTML = `<option value="">Select source</option>${sources.map((source) => `<option value="${escapeHtml(source.id)}">${escapeHtml(source.name)}</option>`).join("")}`;
+  els.sourceOwnerUserInput.innerHTML = `<option value="">Unassigned</option>${users.map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name || user.email)} (${escapeHtml(user.role)})</option>`).join("")}`;
+}
+
+async function saveTenantUser() {
+  if (!backendApi) return setInputMessage("Backend module is not available.");
+  const sourceIds = [...els.adminUserSourceInput.selectedOptions].map((option) => option.value).filter(Boolean);
+  try {
+    const user = await backendApi.saveTenantUser({
+      id: els.adminUserIdInput.value || undefined,
+      name: els.adminUserNameInput.value.trim(),
+      email: els.adminUserEmailInput.value.trim(),
+      role: els.adminUserRoleInput.value,
+      status: els.adminUserStatusInput.value,
+      sourceIds
+    });
+    const users = loadJson(STORAGE_KEYS.tenantUsers, []);
+    const index = users.findIndex((item) => item.id === user.id);
+    if (index >= 0) users.splice(index, 1, user);
+    else users.unshift(user);
+    saveJson(STORAGE_KEYS.tenantUsers, users);
+    clearTenantUserForm();
+    renderTenantAdmin();
+    showToast("Tenant user saved.");
+  } catch (error) {
+    setInputMessage(error.message);
+  }
+}
+
+function editTenantUser(id) {
+  const user = loadJson(STORAGE_KEYS.tenantUsers, []).find((item) => item.id === id);
+  if (!user) return;
+  els.adminUserIdInput.value = user.id;
+  els.adminUserNameInput.value = user.name || "";
+  els.adminUserEmailInput.value = user.email || "";
+  els.adminUserRoleInput.value = user.role || "viewer";
+  els.adminUserStatusInput.value = user.status || "active";
+  [...els.adminUserSourceInput.options].forEach((option) => {
+    option.selected = (user.sourceIds || []).includes(option.value);
+  });
+}
+
+function deleteTenantUser(id) {
+  confirmAction({
+    title: "Delete tenant user?",
+    body: "This removes the user from the SignalPrism tenant roster. It does not change your identity provider.",
+    confirmLabel: "Delete User",
+    onConfirm: async () => {
+      try {
+        await backendApi.deleteTenantUser(id);
+        saveJson(STORAGE_KEYS.tenantUsers, loadJson(STORAGE_KEYS.tenantUsers, []).filter((user) => user.id !== id));
+        renderTenantAdmin();
+        showToast("Tenant user deleted.");
+      } catch (error) {
+        setInputMessage(error.message);
+      }
+    }
+  });
+}
+
+async function assignSourceOwner() {
+  if (!backendApi) return setInputMessage("Backend module is not available.");
+  const sourceId = els.sourceOwnerSourceInput.value;
+  if (!sourceId) return setInputMessage("Select a managed source before assigning ownership.");
+  try {
+    const source = await backendApi.assignSourceOwner(sourceId, els.sourceOwnerUserInput.value);
+    const sources = loadJson(STORAGE_KEYS.sources, []);
+    const index = sources.findIndex((item) => item.id === source.id);
+    if (index >= 0) sources.splice(index, 1, source);
+    saveJson(STORAGE_KEYS.sources, sources);
+    renderCoverage();
+    renderTenantAdmin();
+    showToast("Source owner updated.");
+  } catch (error) {
+    setInputMessage(error.message);
+  }
+}
+
+function clearTenantUserForm() {
+  els.adminUserIdInput.value = "";
+  els.adminUserNameInput.value = "";
+  els.adminUserEmailInput.value = "";
+  els.adminUserRoleInput.value = "analyst";
+  els.adminUserStatusInput.value = "active";
+  [...els.adminUserSourceInput.options].forEach((option) => {
+    option.selected = false;
+  });
+}
+
+function hasRole(role) {
+  return Boolean(state.backend.principal?.roles?.includes(role));
 }
 
 function renderTopology() {

@@ -81,6 +81,23 @@ async function testApiAuth() {
       body: JSON.stringify({ name: "Prod Flow Logs", type: "CloudWatch Log Group", region: "us-east-1", scope: ["/aws/vpc/flowlogs/prod"] })
     });
     assert.equal(sourceResponse.status, 201);
+    const source = await sourceResponse.json();
+
+    const userResponse = await fetch(`${base}/api/admin/users`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ name: "Integration Analyst", email: "analyst@example.com", role: "analyst", sourceIds: [source.id] })
+    });
+    assert.equal(userResponse.status, 201);
+    const user = await userResponse.json();
+
+    const ownerResponse = await fetch(`${base}/api/admin/source-owners`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ sourceId: source.id, ownerId: user.id })
+    });
+    assert.equal(ownerResponse.status, 200);
+    assert.equal((await ownerResponse.json()).ownerUserId, user.id);
 
     const caseResponse = await fetch(`${base}/api/cases`, {
       method: "POST",
@@ -92,9 +109,25 @@ async function testApiAuth() {
     const evidenceResponse = await fetch(`${base}/api/evidence-runs`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
-      body: JSON.stringify({ fileName: "integration.log", recordCount: 1, records: [{ source: "10.0.0.1", destination: "8.8.8.8" }] })
+      body: JSON.stringify({
+        fileName: "integration.log",
+        recordCount: 1,
+        rawEvidenceText: "2 1 eni-1 10.0.0.1 8.8.8.8 1 53 17 1 1 1 2 ACCEPT OK",
+        records: [{ source: "10.0.0.1", destination: "8.8.8.8" }]
+      })
     });
     assert.equal(evidenceResponse.status, 201);
+    const evidence = await evidenceResponse.json();
+    assert.equal(evidence.package.mode, "local");
+    assert.equal(evidence.package.rawEvidenceStored, true);
+
+    const packageResponse = await fetch(`${base}/api/evidence-runs/${encodeURIComponent(evidence.id)}/package`, { headers: { "x-ndr-api-key": "integration-key" } });
+    assert.equal(packageResponse.status, 200);
+    assert.equal((await packageResponse.json()).rawEvidenceStored, true);
+
+    const jobRunsResponse = await fetch(`${base}/api/job-runs`, { headers: { "x-ndr-api-key": "integration-key" } });
+    assert.equal(jobRunsResponse.status, 200);
+    assert.deepEqual(await jobRunsResponse.json(), []);
 
     const exportResponse = await fetch(`${base}/api/exports/investigation`, {
       method: "POST",
@@ -156,6 +189,9 @@ async function testTenantScopedRbac() {
       body: JSON.stringify({ question: "summarize", context: {} })
     });
     assert.equal(viewerAi.status, 403);
+
+    const viewerUsers = await fetch(`${base}/api/admin/users`, { headers: { "x-ndr-test-principal": viewer } });
+    assert.equal(viewerUsers.status, 403);
   } finally {
     await stopServer(server);
     await rm(dataDir, { recursive: true, force: true });

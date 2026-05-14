@@ -21,7 +21,7 @@ Protected endpoints require one of:
 
 ## Roles
 
-- `admin`: all protected endpoints.
+- `admin`: all protected endpoints, including tenant roster, source ownership, destructive deletes, and audit export.
 - `analyst`: save tenant workspaces, cases, evidence runs, sources, ingest, create jobs, run jobs, export investigations, and use the AI assistant.
 - `viewer`: read tenant workspaces, cases, evidence runs, sources, jobs, and runs.
 
@@ -42,6 +42,7 @@ Example response:
   "oidcConfigured": false,
   "awsConfigured": true,
   "bedrockEnabled": false,
+  "evidenceObjectStorage": "local",
   "storeMode": "local",
   "time": "2026-05-05T12:00:00.000Z"
 }
@@ -51,6 +52,8 @@ Example response:
 
 Returns readiness and storage configuration.
 
+Readiness includes the persistence mode plus evidence package storage settings, including whether packages are written locally or to S3.
+
 ### `GET /api/metrics`
 
 Returns Prometheus-style text metrics:
@@ -59,6 +62,7 @@ Returns Prometheus-style text metrics:
 - `ndr_errors_total`
 - `ndr_ingest_runs_total`
 - `ndr_jobs_run_total`
+- `ndr_async_job_runs_total`
 - `ndr_uptime_seconds`
 
 ## Authentication Endpoints
@@ -160,7 +164,27 @@ Protected. Requires `admin`, `analyst`, or `viewer`. Returns bounded evidence ru
 
 ### `POST /api/evidence-runs`
 
-Protected. Requires `admin` or `analyst`. Stores evidence-run metadata, detection summary, and a bounded record sample.
+Protected. Requires `admin` or `analyst`. Stores evidence-run metadata, detection summary, a bounded record sample, and a full raw evidence package when `rawEvidenceText`, `evidenceText`, or `text` is present.
+
+The response includes package metadata:
+
+```json
+{
+  "id": "evidence-1714910400000",
+  "package": {
+    "mode": "s3",
+    "uri": "s3://signalprism-evidence/signalprism/evidence-packages/default/evidence-1714910400000.json",
+    "retentionUntil": "2026-08-03T12:00:00.000Z",
+    "retentionMode": "GOVERNANCE",
+    "bytes": 23184,
+    "rawEvidenceStored": true
+  }
+}
+```
+
+### `GET /api/evidence-runs/{id}/package`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns the stored package metadata for an evidence run. The endpoint intentionally returns package metadata, not raw package contents.
 
 ### `GET /api/sources`
 
@@ -172,7 +196,11 @@ Protected. Requires `admin` or `analyst`. Saves a managed AWS source.
 
 ### `POST /api/sources/{id}/ingest`
 
-Protected. Requires `admin` or `analyst`. Infers CloudWatch or S3 ingest from the managed source scope and imports evidence.
+Protected. Requires `admin` or `analyst`. Infers CloudWatch or S3 ingest from the managed source scope, imports evidence synchronously, stores a raw evidence package, and returns imported text.
+
+### `POST /api/sources/{id}/ingest-async`
+
+Protected. Requires `admin` or `analyst`. Infers CloudWatch or S3 ingest from the managed source scope, starts a background import, and returns `202` with an async job run.
 
 ### `POST /api/sources/{id}/jobs`
 
@@ -181,6 +209,45 @@ Protected. Requires `admin` or `analyst`. Creates a scheduled ingest job from a 
 ### `DELETE /api/sources/{id}`
 
 Protected. Requires `admin`.
+
+## Tenant Admin Endpoints
+
+### `GET /api/admin/users`
+
+Protected. Requires `admin`. Returns tenant roster entries used for role and source ownership administration.
+
+### `POST /api/admin/users`
+
+Protected. Requires `admin`. Creates or updates a tenant roster entry.
+
+Request:
+
+```json
+{
+  "name": "Priya Shah",
+  "email": "priya@example.com",
+  "role": "analyst",
+  "status": "active",
+  "sourceIds": ["source-prod-vpc"]
+}
+```
+
+### `DELETE /api/admin/users/{id}`
+
+Protected. Requires `admin`. Deletes a tenant roster entry.
+
+### `POST /api/admin/source-owners`
+
+Protected. Requires `admin`. Assigns or clears a managed source owner.
+
+Request:
+
+```json
+{
+  "sourceId": "source-prod-vpc",
+  "ownerId": "tenant-user-1714910400000"
+}
+```
 
 ### `GET /api/cases`
 
@@ -227,7 +294,13 @@ Response:
   "sourceLabel": "s3://my-vpc-flow-log-bucket/AWSLogs/...",
   "objectCount": 2,
   "text": "2 123456789012 eni-...",
-  "importedAt": "2026-05-05T12:00:00.000Z"
+  "importedAt": "2026-05-05T12:00:00.000Z",
+  "package": {
+    "mode": "local",
+    "uri": ".ndr-data/evidence-packages/default/ingest-s3-1714910400000.json",
+    "retentionUntil": "2026-08-03T12:00:00.000Z",
+    "rawEvidenceStored": true
+  }
 }
 ```
 
@@ -278,6 +351,23 @@ Request:
 
 Protected. Requires `admin` or `analyst`.
 
+### `POST /api/jobs/{id}/run-async`
+
+Protected. Requires `admin` or `analyst`. Starts a background job execution and returns `202` with a run status object.
+
+Response:
+
+```json
+{
+  "id": "job-run-1714910400000",
+  "jobId": "job-1",
+  "jobName": "Prod VPC flow import",
+  "status": "queued",
+  "progress": 5,
+  "message": "Queued for import"
+}
+```
+
 ### `DELETE /api/jobs/{id}`
 
 Protected. Requires `admin`.
@@ -287,6 +377,10 @@ Protected. Requires `admin`.
 ### `GET /api/runs`
 
 Protected. Requires `admin`, `analyst`, or `viewer`.
+
+### `GET /api/job-runs`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns async job runs for notification polling and investigation history.
 
 ### `GET /api/audit/export`
 

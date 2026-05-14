@@ -31,7 +31,7 @@ Set `NDR_API_KEY` for shared or network-accessible deployments. Clients must sen
 
 For SSO, configure `NDR_OIDC_ISSUER`, `NDR_OIDC_CLIENT_ID`, `NDR_OIDC_AUDIENCE`, and the group mapping variables. The backend verifies RS256 JWTs against the issuer JWKS and maps identity-provider groups to these roles:
 
-- `admin`: full tenant access, destructive deletes, ingest, controlled exports, and audit export.
+- `admin`: full tenant access, tenant user/source ownership management, destructive deletes, ingest, controlled exports, and audit export.
 - `analyst`: manage tenant workspaces, cases, sources, evidence runs, ingest, schedules, investigation exports, and AI actions.
 - `viewer`: read tenant workspaces, cases, sources, evidence runs, jobs, and run history.
 
@@ -43,9 +43,11 @@ The browser uses Authorization Code with PKCE through `/api/auth/token`; do not 
 
 - Flow logs can contain internal IPs, account IDs, ENIs, and infrastructure metadata.
 - Redacted export is available in the UI.
-- Tenant workspaces, cases, evidence-run samples, managed sources, jobs, runs, and ingest metadata are stored under `NDR_DATA_DIR` for local mode or in DynamoDB when `NDR_STORE=dynamodb`.
+- Tenant workspaces, cases, evidence-run samples, managed sources, tenant users, jobs, async job runs, and ingest metadata are stored under `NDR_DATA_DIR` for local mode or in DynamoDB when `NDR_STORE=dynamodb`.
+- Full raw evidence packages are stored separately from evidence-run metadata. Local mode writes them under `.ndr-data/evidence-packages/`; production should use an S3 bucket with Object Lock enabled through `NDR_EVIDENCE_BUCKET`.
 - Audit records are append-only NDJSON in local mode and append-only DynamoDB records in DynamoDB mode. Each record includes `retentionUntil` based on `NDR_AUDIT_RETENTION_DAYS`.
 - The Terraform production stack creates an S3 audit bucket with Object Lock COMPLIANCE retention for immutable exported audit evidence.
+- The Terraform production stack also creates a separate evidence package bucket with versioning, encryption, public access block, and configurable Object Lock retention for raw evidence packages.
 
 ## Bedrock AI
 
@@ -63,6 +65,7 @@ The AWS Bedrock assistant is disabled unless `NDR_BEDROCK_ENABLED=true`. When en
 - Run Fargate tasks in private subnets behind the ALB and require OIDC/SSO for shared deployments.
 - Use least-privilege IAM policies for S3 and CloudWatch Logs.
 - Use DynamoDB for tenant workspaces, cases, evidence metadata, sources, jobs, runs, and audit records; use encrypted EFS only for local scratch/evidence storage.
+- Use S3 Object Lock for retained raw evidence packages and choose retention mode/days before production rollout.
 - Store `NDR_API_KEY` and any OIDC client secret in Secrets Manager.
 - Keep the Bedrock feature flag off in environments that are not approved for AI-assisted analysis.
 - Forward JSON logs to your SIEM.

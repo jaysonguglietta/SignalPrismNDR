@@ -9,6 +9,8 @@
     "smoke": "node smoke-test.js",
     "integration": "node integration-test.mjs",
     "ui:test": "node ui-flow-test.mjs",
+    "visual:test": "playwright test",
+    "visual:update": "playwright test --update-snapshots",
     "check": "node --check app.js && node --check server.mjs && node --check src/aws-sigv4.mjs && node --check integration-test.mjs && node --check ui-flow-test.mjs && node smoke-test.js && node integration-test.mjs && node ui-flow-test.mjs"
   }
 }

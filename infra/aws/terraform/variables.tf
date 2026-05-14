@@ -132,6 +132,23 @@ variable "audit_retention_days" {
   default     = 2555
 }
 
+variable "evidence_retention_days" {
+  type        = number
+  description = "Retention period for raw evidence packages stored with S3 Object Lock."
+  default     = 90
+}
+
+variable "evidence_object_lock_mode" {
+  type        = string
+  description = "S3 Object Lock mode for raw evidence packages."
+  default     = "GOVERNANCE"
+
+  validation {
+    condition     = contains(["GOVERNANCE", "COMPLIANCE"], var.evidence_object_lock_mode)
+    error_message = "evidence_object_lock_mode must be GOVERNANCE or COMPLIANCE."
+  }
+}
+
 variable "oidc_issuer" {
   type        = string
   description = "OIDC issuer URL for SSO."

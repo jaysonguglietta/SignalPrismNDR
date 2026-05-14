@@ -43,6 +43,9 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 7. **Continuous Ingest**
    Configure protected S3 or CloudWatch ingest jobs from either the pipeline form or managed source inventory, then run them manually or on a schedule.
 
+8. **Tenant Administration**
+   Manage tenant roster entries, roles, source ownership, and accountability for cloud evidence sources.
+
 ## Main Screens
 
 - **Overview**: risk metrics, timeline, priority entities, top destination ports.
@@ -53,6 +56,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 - **Coverage**: expected source coverage, blind spots, history, and baselines.
 - **Pipeline**: enrichment, cloud ingest, scheduled jobs, application intelligence, traffic optimization.
 - **Cases**: case intake, queue, notes, severity override, and audit log.
+- **Admin**: tenant users, role intent, source assignments, and ownership list.
 - **Topology**: entity-to-entity path map with playable replay, step controls, scrubber, and recent-event trail.
 - **Reports**: Bedrock assistant, analyst summary, policy recommendations, and privacy exports.
 
@@ -74,6 +78,9 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - `CoverageSource`: tenant-managed source type, account, region, ENI/CIDR/log group/S3 scope, and inferred ingest target.
 - `CaseRecord`: tenant, title, assignee, status, severity, notes, related detection, and audit trail.
 - `EvidenceRun`: tenant, file/source label, count summary, detection summary, and bounded record sample.
+- `EvidencePackage`: retained full raw evidence payload with object URI, storage mode, retention policy, and package size.
+- `TenantUser`: tenant roster record with email, role, status, and source assignments.
+- `AsyncJobRun`: background import status, progress, message, timestamps, and resulting evidence package metadata.
 - `AuditRecord`: append-only actor/action/detail with retention metadata.
 - `IngestJob`: scheduled S3 or CloudWatch import configuration.
 - `Workspace`: tenant investigation container with evidence snapshot, managed sources, hunts, enrichment, and rule profile.
@@ -88,6 +95,9 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Tenant claim missing or changed between identity providers.
 - Viewer attempts to export, invoke AI, or mutate cases.
 - Scheduled jobs that fail because source buckets/log groups change.
+- Long S3/CloudWatch imports that need asynchronous status and clear failure reporting.
+- Tenant admins assigning stale or missing source ownership.
+- Retained raw evidence packages that need Object Lock compatible storage and retention governance.
 - Audit export and retention expectations in regulated environments.
 
 ## Assumptions
@@ -96,6 +106,7 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Browser-side analysis is acceptable for the first production-shaped version.
 - Shared deployments run privately behind HTTPS with API key or OIDC.
 - DynamoDB is the preferred cloud persistence option for tenant workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
+- S3 Object Lock is the preferred production storage path for full raw evidence packages.
 - Bedrock is opt-in and disabled by default.
 
 ## Done For This Version
@@ -105,7 +116,10 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Local upload/paste analysis.
 - S3 and CloudWatch ingest backend with SigV4.
 - Scheduled ingest jobs.
+- Async CloudWatch/S3 import status with completion/failure notifications.
 - Tenant-backed workspace, evidence, source, and case persistence with IndexedDB/local fallback.
+- Tenant admin screen for users, roles, and source ownership.
+- Full raw evidence package storage with local fallback and S3 Object Lock retention.
 - Case management and case audit history.
 - Detection explainability and tunable rule profiles.
 - Managed AWS source inventory with direct ingest and schedule creation.
@@ -117,3 +131,4 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Bedrock feature flag and AI assistant.
 - ECS/Fargate Terraform production path.
 - Smoke, integration, and UI workflow checks.
+- Optional Playwright visual regression specs for browser snapshot review.

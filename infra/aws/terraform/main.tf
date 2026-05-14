@@ -110,6 +110,51 @@ resource "aws_s3_bucket_object_lock_configuration" "audit" {
   }
 }
 
+resource "aws_s3_bucket" "evidence" {
+  bucket_prefix       = "${local.name}-evidence-"
+  object_lock_enabled = true
+  force_destroy       = false
+  tags                = local.tags
+}
+
+resource "aws_s3_bucket_public_access_block" "evidence" {
+  bucket                  = aws_s3_bucket.evidence.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "evidence" {
+  bucket = aws_s3_bucket.evidence.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "evidence" {
+  bucket = aws_s3_bucket.evidence.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_object_lock_configuration" "evidence" {
+  bucket     = aws_s3_bucket.evidence.id
+  depends_on = [aws_s3_bucket_versioning.evidence]
+
+  rule {
+    default_retention {
+      mode = var.evidence_object_lock_mode
+      days = var.evidence_retention_days
+    }
+  }
+}
+
 resource "aws_secretsmanager_secret" "api_key" {
   name = "${local.name}/api-key"
   tags = local.tags
@@ -216,6 +261,11 @@ resource "aws_iam_policy" "ingest" {
         Effect   = "Allow"
         Action   = ["s3:PutObject", "s3:GetObject"]
         Resource = "${aws_s3_bucket.audit.arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject"]
+        Resource = "${aws_s3_bucket.evidence.arn}/*"
       },
       {
         Effect   = "Allow"
@@ -449,6 +499,11 @@ resource "aws_ecs_task_definition" "app" {
         { name = "NDR_RATE_LIMIT_MAX", value = tostring(var.rate_limit_max) },
         { name = "NDR_RATE_LIMIT_WINDOW_MS", value = tostring(var.rate_limit_window_ms) },
         { name = "NDR_AUDIT_RETENTION_DAYS", value = tostring(var.audit_retention_days) },
+        { name = "NDR_EVIDENCE_BUCKET", value = aws_s3_bucket.evidence.bucket },
+        { name = "NDR_EVIDENCE_PREFIX", value = "signalprism/evidence-packages" },
+        { name = "NDR_EVIDENCE_REGION", value = var.region },
+        { name = "NDR_EVIDENCE_RETENTION_DAYS", value = tostring(var.evidence_retention_days) },
+        { name = "NDR_EVIDENCE_OBJECT_LOCK_MODE", value = var.evidence_object_lock_mode },
         { name = "NDR_OIDC_ISSUER", value = var.oidc_issuer },
         { name = "NDR_OIDC_AUDIENCE", value = var.oidc_audience },
         { name = "NDR_OIDC_CLIENT_ID", value = var.oidc_client_id },
@@ -567,6 +622,10 @@ output "dynamodb_table_name" {
 
 output "audit_bucket_name" {
   value = aws_s3_bucket.audit.bucket
+}
+
+output "evidence_bucket_name" {
+  value = aws_s3_bucket.evidence.bucket
 }
 
 output "api_key_secret_arn" {

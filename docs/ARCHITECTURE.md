@@ -14,6 +14,7 @@ flowchart LR
   API --> DDB["DynamoDB<br>tenant store"]
   API --> BR["Amazon Bedrock Runtime"]
   API --> Audit["S3 Object Lock<br>audit exports"]
+  API --> Evidence["S3 Object Lock or local files<br>raw evidence packages"]
   API --> OIDC["OIDC Provider"]
 ```
 
@@ -45,6 +46,9 @@ Responsibilities:
 - S3 and CloudWatch ingest with AWS SigV4.
 - Scheduled job management.
 - Tenant-scoped local JSON or DynamoDB persistence for workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
+- Full raw evidence package persistence to local object-package files or S3 Object Lock storage.
+- Tenant admin roster and source ownership management.
+- Background S3/CloudWatch job runs with polling status.
 - Append-only audit records and export.
 - RBAC-controlled investigation package export.
 - Bedrock Converse API requests when feature-flagged.
@@ -70,8 +74,16 @@ Backend persistence:
 
 - `NDR_STORE=local`: JSON/NDJSON files under `NDR_DATA_DIR`.
 - `NDR_STORE=dynamodb`: single-table DynamoDB with `pk`, `sk`, `createdAt`, and serialized `payload`.
-- Tenant-scoped records use partition keys shaped as `TENANT#<tenantId>#<kind>` for `WORKSPACE`, `CASE`, `EVIDENCE`, and `SOURCE`.
+- Tenant-scoped records use partition keys shaped as `TENANT#<tenantId>#<kind>` for `WORKSPACE`, `CASE`, `EVIDENCE`, `SOURCE`, `JOB_RUN`, and `TENANT_USER`.
 - Jobs, runs, and audit records include `tenantId` and are filtered by the resolved principal tenant.
+
+Evidence package persistence:
+
+- Browser uploads and backend S3/CloudWatch imports include raw evidence text when saving an evidence run.
+- The metadata/sample is stored with the evidence run.
+- The full raw package is written to `.ndr-data/evidence-packages/<tenant>/` in local mode.
+- When `NDR_EVIDENCE_BUCKET` is configured, the backend writes package JSON to S3 with Object Lock mode and retain-until-date headers.
+- Evidence package metadata stores the object URI, retention deadline, size, mode, and whether raw evidence was included.
 
 ## Authentication And Authorization
 
@@ -95,7 +107,7 @@ Tenant mapping:
 
 Authorization boundaries:
 
-- `admin`: full tenant access, destructive deletes, audit export.
+- `admin`: full tenant access, tenant roster/source ownership management, destructive deletes, audit export.
 - `analyst`: create/update tenant workspaces, cases, sources, evidence runs, ingest jobs, AI actions, and investigation exports.
 - `viewer`: read-only tenant inspection. AI and exports are blocked.
 
@@ -111,6 +123,7 @@ Terraform provisions:
 - Secrets Manager.
 - CloudWatch Logs.
 - S3 Object Lock audit bucket.
+- S3 Object Lock evidence package bucket.
 - IAM roles and policies.
 - ECS service autoscaling.
 
@@ -122,12 +135,14 @@ sequenceDiagram
   participant A as Backend
   participant S as S3 or CloudWatch
   participant D as DynamoDB or Local Store
+  participant E as Evidence Package Storage
   participant R as Bedrock
 
   B->>B: Parse uploaded/pasted logs
   B->>B: Generate detections and entity risk
   B->>A: POST /api/evidence-runs
   A->>D: Store tenant evidence metadata/sample
+  A->>E: Store raw evidence package with retention metadata
   B->>A: POST /api/workspaces or /api/cases
   A->>D: Store tenant investigation state
   B->>A: POST /api/ingest/s3 or /api/ingest/cloudwatch
@@ -145,6 +160,7 @@ sequenceDiagram
 ## Design Principles
 
 - Keep raw evidence local by default.
+- Store full raw evidence packages only when explicitly saved through the backend or ingested through managed cloud paths, with retention metadata.
 - Use the backend only for privileged operations.
 - Enforce tenant boundaries server-side for shared workspaces, cases, sources, evidence metadata, exports, and AI actions.
 - Prefer clear data models and replaceable storage boundaries.
@@ -158,4 +174,4 @@ sequenceDiagram
 - Large evidence sets are bounded for browser performance.
 - Bedrock answers are advisory and must be validated against source evidence.
 - Terraform assumes an existing VPC and subnets.
-- Full raw evidence archive storage still needs an object-store design for very large investigations; the current tenant evidence store keeps bounded samples and metadata.
+- Raw evidence package uploads still pass through the current JSON request body limit, so very large browser uploads need multipart/direct-upload support in a future release.

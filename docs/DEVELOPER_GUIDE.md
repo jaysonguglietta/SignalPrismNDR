@@ -11,6 +11,7 @@
 ├── smoke-test.js
 ├── integration-test.mjs
 ├── ui-flow-test.mjs
+├── playwright.config.mjs
 ├── scripts/
 │   └── build.mjs
 ├── src/
@@ -50,6 +51,18 @@ npm run ui:test
 ```
 
 Runs no-dependency UI workflow checks for upload/demo analysis, rule tuning, AI context shaping, investigation package export, and topology replay helpers.
+
+```bash
+npm run visual:test
+```
+
+Runs optional Playwright visual regression specs under `tests/visual/`. This requires installing `@playwright/test` and browser binaries in an environment where dependency downloads are allowed.
+
+```bash
+npm run visual:update
+```
+
+Updates Playwright snapshots after an intentional UI change.
 
 ```bash
 npm run check
@@ -123,6 +136,9 @@ Integration tests validate:
 - Protected API auth.
 - API key behavior.
 - Tenant-scoped cases, workspaces, evidence runs, sources, and exports.
+- Tenant admin users and source ownership.
+- Raw evidence package metadata and local package persistence.
+- Async job run list access.
 - Viewer write/export/AI restrictions.
 - Disabled Bedrock endpoint behavior.
 - Rate limiting.
@@ -135,6 +151,14 @@ UI flow tests validate:
 - AI summary context content.
 - Investigation package shape and evidence caps.
 - Topology replay timeline state.
+
+Visual regression specs cover:
+
+- Guided demo dashboard.
+- Topology replay.
+- Tenant admin management.
+
+They are intentionally separate from `npm run check` so the dependency-free path stays fast and works in restricted environments.
 
 ## CI
 

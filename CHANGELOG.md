@@ -19,6 +19,10 @@ All notable changes to SignalPrism NDR are tracked here.
 - Managed source inventory actions for direct CloudWatch/S3 ingest and scheduled job creation.
 - Playable topology replay with step controls and a recent-event trail.
 - Automated UI workflow checks for upload/demo, rule tuning, AI context, export, and replay flows.
+- Full raw evidence package storage with local fallback and S3 Object Lock retention configuration.
+- Tenant admin screen and APIs for users, roles, and managed source ownership.
+- Async CloudWatch/S3 import execution with status polling and completion/failure notifications.
+- Optional Playwright visual regression configuration and desktop/mobile snapshot specs.
 
 ## 0.2.0 - 2026-05-05
 

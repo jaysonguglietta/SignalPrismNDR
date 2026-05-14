@@ -38,7 +38,9 @@ Cloud ingest uses environment credentials:
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_SESSION_TOKEN=... npm start
 ```
 
-The backend stores tenant workspaces, cases, evidence-run metadata, managed sources, job metadata, ingest runs, and audit records under `.ndr-data/` by default. Set `NDR_STORE=dynamodb` and `NDR_DDB_TABLE` to use DynamoDB for the tenant store.
+The backend stores tenant workspaces, cases, evidence-run metadata, managed sources, job metadata, async job runs, tenant users, ingest runs, and audit records under `.ndr-data/` by default. Set `NDR_STORE=dynamodb` and `NDR_DDB_TABLE` to use DynamoDB for the tenant store.
+
+Full raw evidence packages are written to local object-package storage under `.ndr-data/evidence-packages/` by default. Set `NDR_EVIDENCE_BUCKET` to write packages to S3 with Object Lock retention headers controlled by `NDR_EVIDENCE_RETENTION_DAYS` and `NDR_EVIDENCE_OBJECT_LOCK_MODE`.
 
 For shared environments, set `NDR_API_KEY` and configure clients to send `x-ndr-api-key`, or configure OIDC/SSO with `NDR_OIDC_ISSUER`, `NDR_OIDC_CLIENT_ID`, `NDR_OIDC_AUDIENCE`, `NDR_TENANT_CLAIM`, and the role group mappings. The backend supports tenant-aware `admin`, `analyst`, and `viewer` roles.
 
@@ -82,6 +84,14 @@ Run automated UI workflow checks with:
 npm run ui:test
 ```
 
+Optional visual regression specs are available for Playwright/browser-driver runs:
+
+```bash
+npm run visual:test
+```
+
+Install `@playwright/test` and browser binaries before using the visual scripts.
+
 Build the dependency-free distributable with:
 
 ```bash
@@ -107,9 +117,10 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 6. Tune the detection profile for strict, balanced, or focused review.
 7. Pivot into entity risk, entity timeline, internal paths, external paths, or filtered raw records.
 8. Run advanced hunts with fielded queries and save reusable hunts.
-9. Track managed sources, coverage, ingest history, and saved baselines, then ingest or schedule CloudWatch/S3 imports directly from source inventory.
+9. Track managed sources, coverage, ingest history, async job status, and saved baselines, then ingest or schedule CloudWatch/S3 imports directly from source inventory.
 10. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
-11. Simulate traffic reduction policies and export detections, records, and full investigation packages.
+11. Manage tenant users, roles, and source ownership from the Admin screen.
+12. Simulate traffic reduction policies and export detections, records, and full investigation packages.
 
 ## Supported input
 
@@ -121,7 +132,7 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 - Azure NSG Flow Log JSON.
 - GCP VPC Flow Log JSON.
 
-Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, managed source definitions, and controlled investigation exports are persisted through tenant-scoped APIs.
+Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, raw evidence package references, managed source definitions, tenant admin records, async job runs, and controlled investigation exports are persisted through tenant-scoped APIs.
 
 ## NDR detections
 
@@ -166,9 +177,13 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - Case queue with status, severity override, assignee, notes, and audit log.
 - Detection explainability, confidence interpretation, and tunable rule profiles.
 - Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, prefixes, direct ingest, and schedule creation.
+- Tenant admin screen for users, roles, and managed source ownership.
+- Full raw evidence packages in local package storage or S3 Object Lock storage with retention metadata.
+- Async CloudWatch/S3 import runs with polling status and completion/failure notifications.
 - RBAC-controlled portable investigation package export.
 - Visual topology map with playable time replay, scrubbing, step controls, and recent-event trail.
 - Automated UI flow tests for upload/demo analysis, rule tuning, AI context, investigation export, and topology replay.
+- Optional Playwright visual regression specs for desktop and mobile browser snapshots.
 
 ## Data model
 
@@ -181,4 +196,7 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - `Workspace`: tenant, name, current evidence snapshot, detections, source inventory, hunts, enrichment, rule profile, and baseline signatures.
 - `Case`: tenant, title, assignee, status, severity override, notes, linked detection, and audit trail.
 - `ManagedSource`: tenant, source type, account, region, scope, and inferred S3/CloudWatch ingest target.
+- `TenantUser`: tenant roster entry with email, role, status, and owned/assigned sources.
+- `EvidencePackage`: full raw evidence package with bounded record sample, analysis summary, object URI, retention deadline, and storage mode.
+- `AsyncJobRun`: queued, running, completed, or failed import execution with progress, status message, and evidence package reference.
 - `AuditRecord`: append-only actor, role, action, details, creation time, and retention deadline.

@@ -30,6 +30,7 @@ Metrics:
 - `ndr_errors_total`
 - `ndr_ingest_runs_total`
 - `ndr_jobs_run_total`
+- `ndr_async_job_runs_total`
 - `ndr_uptime_seconds`
 
 ## Logs
@@ -76,6 +77,21 @@ Actions:
 4. For CloudWatch Logs, confirm log group ARN permissions.
 5. Confirm source logs contain VPC Flow Log messages.
 6. Review backend logs for AWS status and error body.
+
+### Async Import Stalls
+
+Symptoms:
+
+- A source or job async run remains `queued` or `running`.
+- The UI does not show a completion/failure toast.
+
+Actions:
+
+1. Refresh `/api/job-runs` and confirm the run status.
+2. Check backend logs for `job.run.async.*` audit activity and AWS errors.
+3. Confirm the process was not restarted during the import; local async jobs run in-process.
+4. Re-run the import synchronously to isolate source permissions from background execution.
+5. For production, confirm autoscaling and deployment workflows allow in-flight jobs to drain.
 
 ### API Key Or SSO Failure
 
@@ -125,27 +141,34 @@ Actions:
 
 ### Browser Data
 
-IndexedDB and LocalStorage are local to the analyst browser. For durable multi-user evidence storage, move evidence metadata to a backend store in a future release.
+IndexedDB and LocalStorage are local to the analyst browser. Durable multi-user deployments should use the backend tenant store for evidence metadata and S3 Object Lock evidence package storage for retained raw evidence.
 
 ### Local Backend Mode
 
 Back up `NDR_DATA_DIR`:
 
 - `jobs.json`
+- `job-runs.json`
 - `ingest-runs.json`
 - `workspaces.json`
 - `cases.json`
 - `evidence-runs.json`
+- `evidence-packages/`
 - `sources.json`
+- `tenant-users.json`
 - `audit.ndjson`
 
 ### DynamoDB Mode
 
-Terraform enables point-in-time recovery. Confirm backups and retention with account policy. Tenant-scoped workspaces, cases, evidence runs, and managed sources use `TENANT#<tenantId>#<kind>` partition keys.
+Terraform enables point-in-time recovery. Confirm backups and retention with account policy. Tenant-scoped workspaces, cases, evidence runs, managed sources, tenant users, and async job runs use `TENANT#<tenantId>#<kind>` partition keys.
 
 ### Audit Exports
 
 Terraform creates an S3 Object Lock bucket for immutable audit exports. Retention is controlled by `audit_retention_days`.
+
+### Evidence Packages
+
+Local evidence packages are JSON files under `evidence-packages/<tenant>/`. In AWS, Terraform creates a separate S3 Object Lock bucket for full raw evidence packages. Retention is controlled by `evidence_retention_days` and `evidence_object_lock_mode`.
 
 ## Maintenance
 
@@ -155,6 +178,7 @@ Recommended recurring tasks:
 - Review IAM permissions for least privilege.
 - Review CloudWatch log retention.
 - Confirm DynamoDB point-in-time recovery remains enabled.
+- Confirm evidence package retention and Object Lock mode match policy.
 - Confirm Bedrock model allow-list and approval status.
 - Run `npm run check` before deployment.
 - Review scheduled job errors.

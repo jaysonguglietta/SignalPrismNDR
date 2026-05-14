@@ -54,8 +54,28 @@ export async function ingestManagedSource(id) {
   return apiPost(`/api/sources/${encodeURIComponent(id)}/ingest`, {});
 }
 
+export async function ingestManagedSourceAsync(id) {
+  return apiPost(`/api/sources/${encodeURIComponent(id)}/ingest-async`, {});
+}
+
 export async function scheduleManagedSource(id, job) {
   return apiPost(`/api/sources/${encodeURIComponent(id)}/jobs`, job);
+}
+
+export async function listTenantUsers() {
+  return apiGet("/api/admin/users");
+}
+
+export async function saveTenantUser(user) {
+  return apiPost("/api/admin/users", user);
+}
+
+export async function deleteTenantUser(id) {
+  return apiDelete(`/api/admin/users/${encodeURIComponent(id)}`);
+}
+
+export async function assignSourceOwner(sourceId, ownerId) {
+  return apiPost("/api/admin/source-owners", { sourceId, ownerId });
 }
 
 export async function listCases() {
@@ -98,8 +118,16 @@ export async function runJob(id) {
   return apiPost(`/api/jobs/${encodeURIComponent(id)}/run`, {});
 }
 
+export async function runJobAsync(id) {
+  return apiPost(`/api/jobs/${encodeURIComponent(id)}/run-async`, {});
+}
+
 export async function deleteJob(id) {
   return apiDelete(`/api/jobs/${encodeURIComponent(id)}`);
+}
+
+export async function listJobRuns() {
+  return apiGet("/api/job-runs");
 }
 
 export async function listBackendRuns() {

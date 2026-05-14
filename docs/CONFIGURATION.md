@@ -16,6 +16,20 @@ SignalPrism NDR is configured with environment variables. Start with `.env.examp
 | `NDR_RETAIN_RUNS` | `50` | Local/DynamoDB run history limit returned by API. |
 | `NDR_AUDIT_RETENTION_DAYS` | `2555` | Retention metadata stamped onto audit records. |
 
+## Evidence Package Storage
+
+The tenant evidence metadata store keeps summaries and bounded samples. Full raw evidence packages are stored separately so large uploads and imports can move to object storage without changing the evidence-run API shape.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NDR_EVIDENCE_BUCKET` | empty | Optional S3 bucket for full raw evidence packages. Empty uses local package files under `NDR_DATA_DIR`. |
+| `NDR_EVIDENCE_PREFIX` | `signalprism/evidence-packages` | S3 key prefix or local package namespace. |
+| `NDR_EVIDENCE_REGION` | AWS region env or DynamoDB region | Region used for S3 package writes. |
+| `NDR_EVIDENCE_RETENTION_DAYS` | `90` | Retention period stamped on evidence packages. |
+| `NDR_EVIDENCE_OBJECT_LOCK_MODE` | `GOVERNANCE` | S3 Object Lock mode for evidence package writes. Use `COMPLIANCE` only when policy requires immutable legal retention. |
+
+When `NDR_EVIDENCE_BUCKET` is set, the bucket must have S3 Object Lock enabled before objects are written. The backend writes package JSON with `x-amz-object-lock-mode` and `x-amz-object-lock-retain-until-date` headers.
+
 ## Persistence
 
 | Variable | Default | Purpose |
@@ -31,7 +45,10 @@ Local mode stores:
 - `workspaces.json`
 - `cases.json`
 - `evidence-runs.json`
+- `evidence-packages/<tenant>/*.json`
 - `sources.json`
+- `job-runs.json`
+- `tenant-users.json`
 - `audit.ndjson`
 
 DynamoDB mode uses:
@@ -39,7 +56,7 @@ DynamoDB mode uses:
 - Partition key: `pk`
 - Sort key: `sk`
 - Record payload: JSON string in `payload`
-- Tenant partitions: `TENANT#<tenantId>#WORKSPACE`, `TENANT#<tenantId>#CASE`, `TENANT#<tenantId>#EVIDENCE`, and `TENANT#<tenantId>#SOURCE`.
+- Tenant partitions: `TENANT#<tenantId>#WORKSPACE`, `TENANT#<tenantId>#CASE`, `TENANT#<tenantId>#EVIDENCE`, `TENANT#<tenantId>#SOURCE`, `TENANT#<tenantId>#JOB_RUN`, and `TENANT#<tenantId>#TENANT_USER`.
 
 ## AWS Credentials
 
@@ -75,7 +92,7 @@ Tokens must be RS256 signed. The backend checks issuer, optional audience, expir
 
 RBAC is enforced server-side:
 
-- `admin`: full tenant access, source/case/job deletes, audit export.
+- `admin`: full tenant access, tenant user/source ownership management, source/case/job deletes, audit export.
 - `analyst`: save workspaces, cases, sources, evidence runs, run/schedule ingest, export investigations, and invoke Bedrock.
 - `viewer`: read tenant workspaces, cases, sources, evidence runs, jobs, and runs.
 

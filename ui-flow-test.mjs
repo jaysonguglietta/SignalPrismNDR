@@ -22,6 +22,10 @@ assertIncludes(html, 'id="summarizeAiButton"', "AI summary button should exist")
 assertIncludes(html, 'id="exportInvestigationPackageButton"', "investigation export button should exist");
 assertIncludes(html, 'id="playReplayButton"', "topology replay play button should exist");
 assertIncludes(html, 'id="replayEventList"', "topology replay event list should exist");
+assertIncludes(html, 'id="adminTab"', "tenant admin tab should exist");
+assertIncludes(html, 'id="saveTenantUserButton"', "tenant user save control should exist");
+assertIncludes(html, 'id="assignSourceOwnerButton"', "source ownership assignment should exist");
+assertIncludes(html, 'id="backendJobRunsList"', "async job run status list should exist");
 
 const parsed = parseVpcFlowLog(SAMPLE_LOG);
 const analysis = analyzeRecords(parsed.records, parsed.errors);

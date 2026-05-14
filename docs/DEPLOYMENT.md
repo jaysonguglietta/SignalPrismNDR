@@ -30,7 +30,9 @@ This mode enables:
 - API health and metrics.
 - S3/CloudWatch ingest when AWS credentials are configured.
 - Local scheduled jobs.
+- Async CloudWatch/S3 job status polling.
 - Local backend audit.
+- Local raw evidence package files.
 - Optional API key.
 - Optional OIDC.
 - Optional Bedrock.
@@ -58,6 +60,7 @@ The production path provisions:
 - Secrets Manager secrets.
 - CloudWatch Logs.
 - S3 Object Lock audit bucket.
+- S3 Object Lock evidence package bucket.
 - Task IAM policies.
 - Autoscaling.
 
@@ -131,7 +134,20 @@ NDR_DDB_TABLE=<table>
 
 Enable point-in-time recovery and server-side encryption. Terraform does this by default.
 
-DynamoDB stores tenant-scoped workspaces, cases, evidence-run metadata, managed sources, jobs, runs, and audit records. Configure `NDR_DEFAULT_TENANT` for API-key deployments and `NDR_TENANT_CLAIM` for OIDC deployments.
+DynamoDB stores tenant-scoped workspaces, cases, evidence-run metadata, managed sources, tenant users, jobs, async job runs, ingest runs, and audit records. Configure `NDR_DEFAULT_TENANT` for API-key deployments and `NDR_TENANT_CLAIM` for OIDC deployments.
+
+## Evidence Package Storage
+
+Local backend mode writes full raw evidence packages to `.ndr-data/evidence-packages/`. Production Terraform creates an S3 bucket with Object Lock enabled and passes these environment variables to the task:
+
+```text
+NDR_EVIDENCE_BUCKET=<terraform evidence bucket>
+NDR_EVIDENCE_PREFIX=signalprism/evidence-packages
+NDR_EVIDENCE_RETENTION_DAYS=90
+NDR_EVIDENCE_OBJECT_LOCK_MODE=GOVERNANCE
+```
+
+Choose retention values before production rollout. Buckets using Object Lock must be created with Object Lock enabled, and reducing locked retention later may be constrained by AWS and your compliance policy.
 
 ## Bedrock Deployment
 
@@ -162,6 +178,8 @@ Then validate:
 - Role mappings are correct.
 - S3 ingest succeeds.
 - CloudWatch ingest succeeds.
+- Async source/job ingest reports completion or failure.
 - Job create/run/delete follows role rules.
+- Tenant admin user and source ownership flows work for admins and are blocked for viewers.
 - Audit export works for admins.
 - Bedrock config reflects expected enabled/disabled state.

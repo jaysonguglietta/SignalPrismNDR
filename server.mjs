@@ -15,8 +15,11 @@ const RUNS_FILE = join(DATA_DIR, "ingest-runs.json");
 const WORKSPACES_FILE = join(DATA_DIR, "workspaces.json");
 const CASES_FILE = join(DATA_DIR, "cases.json");
 const EVIDENCE_FILE = join(DATA_DIR, "evidence-runs.json");
+const JOB_RUNS_FILE = join(DATA_DIR, "job-runs.json");
 const SOURCES_FILE = join(DATA_DIR, "sources.json");
+const TENANT_USERS_FILE = join(DATA_DIR, "tenant-users.json");
 const AUDIT_FILE = join(DATA_DIR, "audit.ndjson");
+const EVIDENCE_PACKAGES_DIR = join(DATA_DIR, "evidence-packages");
 const MAX_BODY_BYTES = Number(process.env.NDR_MAX_BODY_BYTES || 1024 * 1024);
 const RATE_LIMIT_WINDOW_MS = Number(process.env.NDR_RATE_LIMIT_WINDOW_MS || 60_000);
 const RATE_LIMIT_MAX = Number(process.env.NDR_RATE_LIMIT_MAX || 120);
@@ -45,13 +48,19 @@ const VIEWER_GROUP = process.env.NDR_VIEWER_GROUP || "ndr-viewer";
 const DEFAULT_TENANT = process.env.NDR_DEFAULT_TENANT || "default";
 const TENANT_CLAIM = process.env.NDR_TENANT_CLAIM || "tenant_id";
 const TEST_AUTH_ENABLED = process.env.NDR_TEST_AUTH_ENABLED === "true";
+const EVIDENCE_BUCKET = process.env.NDR_EVIDENCE_BUCKET || "";
+const EVIDENCE_PREFIX = process.env.NDR_EVIDENCE_PREFIX || "signalprism/evidence-packages";
+const EVIDENCE_REGION = process.env.NDR_EVIDENCE_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || DDB_REGION;
+const EVIDENCE_RETENTION_DAYS = Number(process.env.NDR_EVIDENCE_RETENTION_DAYS || 90);
+const EVIDENCE_OBJECT_LOCK_MODE = process.env.NDR_EVIDENCE_OBJECT_LOCK_MODE || "GOVERNANCE";
 const PUBLIC_API_PATHS = new Set(["/api/health", "/api/ready", "/api/metrics", "/api/auth/config", "/api/auth/token", "/api/ai/config"]);
 const METRICS = {
   startedAt: new Date().toISOString(),
   requests: 0,
   errors: 0,
   ingestRuns: 0,
-  jobsRun: 0
+  jobsRun: 0,
+  asyncJobRuns: 0
 };
 
 const MIME = {
@@ -76,8 +85,11 @@ if (STORE_MODE === "local") {
   await ensureJsonFile(WORKSPACES_FILE, []);
   await ensureJsonFile(CASES_FILE, []);
   await ensureJsonFile(EVIDENCE_FILE, []);
+  await ensureJsonFile(JOB_RUNS_FILE, []);
   await ensureJsonFile(SOURCES_FILE, []);
+  await ensureJsonFile(TENANT_USERS_FILE, []);
   await ensureTextFile(AUDIT_FILE, "");
+  await mkdir(EVIDENCE_PACKAGES_DIR, { recursive: true });
 }
 await restoreSchedules();
 
@@ -114,6 +126,7 @@ async function routeApi(req, res) {
       bedrockEnabled: BEDROCK_ENABLED,
       storeMode: STORE_MODE,
       tenantDefault: DEFAULT_TENANT,
+      evidenceObjectStorage: EVIDENCE_BUCKET ? "s3" : "local",
       time: new Date().toISOString()
     });
     return;
@@ -131,7 +144,8 @@ async function routeApi(req, res) {
       oidcEnabled: Boolean(OIDC_ISSUER && OIDC_CLIENT_ID),
       bedrockEnabled: BEDROCK_ENABLED,
       bedrockModelId: BEDROCK_ENABLED ? BEDROCK_MODEL_ID : undefined,
-      tenantClaim: TENANT_CLAIM
+      tenantClaim: TENANT_CLAIM,
+      evidencePackageStorage: EVIDENCE_BUCKET ? { mode: "s3", bucket: EVIDENCE_BUCKET, prefix: EVIDENCE_PREFIX, retentionDays: EVIDENCE_RETENTION_DAYS } : { mode: "local", retentionDays: EVIDENCE_RETENTION_DAYS }
     });
     return;
   }
@@ -155,6 +169,39 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/auth/me") {
     sendJson(res, 200, { principal: req.principal });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/admin/users") {
+    if (!requireRole(req, res, ["admin"])) return;
+    sendJson(res, 200, await listTenantObjects("TENANT_USER", req.principal.tenantId, TENANT_USERS_FILE));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/users") {
+    if (!requireRole(req, res, ["admin"])) return;
+    const body = await readJson(req);
+    const user = normalizeTenantUser(body, req.principal);
+    await putTenantObject("TENANT_USER", user.id, user, req.principal.tenantId, TENANT_USERS_FILE);
+    await appendAudit("tenant.user.saved", { userId: user.id, email: user.email, role: user.role, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, body.id ? 200 : 201, user);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/admin/users/")) {
+    if (!requireRole(req, res, ["admin"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    await deleteTenantObject("TENANT_USER", id, req.principal.tenantId, TENANT_USERS_FILE);
+    await appendAudit("tenant.user.deleted", { userId: id, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/source-owners") {
+    if (!requireRole(req, res, ["admin"])) return;
+    const body = await readJson(req);
+    const source = await assignSourceOwner(body.sourceId, body.ownerId, req.principal);
+    sendJson(res, 200, source);
     return;
   }
 
@@ -193,9 +240,22 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const run = normalizeEvidenceRun(body, req.principal);
+    run.package = await persistEvidencePackage(run, body, req.principal);
     await putTenantObject("EVIDENCE", run.id, run, req.principal.tenantId, EVIDENCE_FILE);
-    await appendAudit("evidence.saved", { evidenceRunId: run.id, fileName: run.fileName, records: run.recordCount, tenantId: req.principal.tenantId }, req.principal);
+    await appendAudit("evidence.saved", { evidenceRunId: run.id, fileName: run.fileName, records: run.recordCount, packageUri: run.package?.uri || "", tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 201, run);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/api/evidence-runs/") && url.pathname.endsWith("/package")) {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").at(-2));
+    const run = await getTenantObject("EVIDENCE", id, req.principal.tenantId, EVIDENCE_FILE);
+    if (!run) {
+      sendJson(res, 404, { error: "Evidence run not found" });
+      return;
+    }
+    sendJson(res, 200, run.package || null);
     return;
   }
 
@@ -233,9 +293,36 @@ async function routeApi(req, res) {
       return;
     }
     const result = await ingestManagedSource(source);
+    const packageInfo = await persistEvidencePackage(
+      { id: `source-${source.id}-${Date.now()}`, tenantId: req.principal.tenantId, fileName: result.sourceLabel, sourceLabel: result.sourceLabel, recordCount: result.eventCount || result.objectCount || 0 },
+      { rawEvidenceText: result.text, source: result.sourceLabel },
+      req.principal
+    ).catch((error) => ({ mode: "error", error: error.message }));
     await appendRun({ ...result, tenantId: req.principal.tenantId, sourceId: source.id, sourceName: source.name });
-    await appendAudit("source.ingest.completed", { sourceId: source.id, name: source.name, source: result.source, tenantId: req.principal.tenantId }, req.principal);
-    sendJson(res, 200, result);
+    await appendAudit("source.ingest.completed", { sourceId: source.id, name: source.name, source: result.source, packageUri: packageInfo?.uri || "", tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ...result, package: packageInfo });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/sources/") && url.pathname.endsWith("/ingest-async")) {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").at(-2));
+    const source = await getTenantObject("SOURCE", id, req.principal.tenantId, SOURCES_FILE);
+    if (!source) {
+      sendJson(res, 404, { error: "Managed source not found" });
+      return;
+    }
+    const ingestConfig = managedSourceIngestConfig(source);
+    const job = {
+      id: `source-${source.id}`,
+      tenantId: req.principal.tenantId,
+      sourceId: source.id,
+      name: `${source.name} on-demand ingest`,
+      type: ingestConfig.type,
+      config: ingestConfig.config
+    };
+    const run = await startAsyncJobRun(job, req.principal);
+    sendJson(res, 202, run);
     return;
   }
 
@@ -342,9 +429,14 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const result = await ingestS3(body);
+    const packageInfo = await persistEvidencePackage(
+      { id: `ingest-${Date.now()}`, tenantId: req.principal.tenantId, fileName: result.sourceLabel, sourceLabel: result.sourceLabel, recordCount: result.objectCount },
+      { rawEvidenceText: result.text, source: result.sourceLabel },
+      req.principal
+    ).catch((error) => ({ mode: "error", error: error.message }));
     await appendRun({ ...result, tenantId: req.principal.tenantId });
-    await appendAudit("ingest.s3.completed", { sourceLabel: result.sourceLabel, objectCount: result.objectCount, tenantId: req.principal.tenantId }, req.principal);
-    sendJson(res, 200, result);
+    await appendAudit("ingest.s3.completed", { sourceLabel: result.sourceLabel, objectCount: result.objectCount, packageUri: packageInfo?.uri || "", tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ...result, package: packageInfo });
     return;
   }
 
@@ -352,9 +444,14 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const result = await ingestCloudWatch(body);
+    const packageInfo = await persistEvidencePackage(
+      { id: `ingest-${Date.now()}`, tenantId: req.principal.tenantId, fileName: result.sourceLabel, sourceLabel: result.sourceLabel, recordCount: result.eventCount },
+      { rawEvidenceText: result.text, source: result.sourceLabel },
+      req.principal
+    ).catch((error) => ({ mode: "error", error: error.message }));
     await appendRun({ ...result, tenantId: req.principal.tenantId });
-    await appendAudit("ingest.cloudwatch.completed", { sourceLabel: result.sourceLabel, eventCount: result.eventCount, tenantId: req.principal.tenantId }, req.principal);
-    sendJson(res, 200, result);
+    await appendAudit("ingest.cloudwatch.completed", { sourceLabel: result.sourceLabel, eventCount: result.eventCount, packageUri: packageInfo?.uri || "", tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ...result, package: packageInfo });
     return;
   }
 
@@ -413,6 +510,26 @@ async function routeApi(req, res) {
     }
     const result = await runJob(job);
     sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/jobs/") && url.pathname.endsWith("/run-async")) {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").at(-2));
+    const jobs = await listJobs();
+    const job = jobs.find((item) => item.id === id && sameTenant(item, req.principal.tenantId));
+    if (!job) {
+      sendJson(res, 404, { error: "Job not found" });
+      return;
+    }
+    const run = await startAsyncJobRun(job, req.principal);
+    sendJson(res, 202, run);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/job-runs") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    sendJson(res, 200, await listTenantObjects("JOB_RUN", req.principal.tenantId, JOB_RUNS_FILE, 100));
     return;
   }
 
@@ -823,6 +940,12 @@ async function runJob(job) {
   let result;
   try {
     result = job.type === "s3" ? await ingestS3(job.config) : await ingestCloudWatch(job.config);
+    const packageInfo = await persistEvidencePackage(
+      { id: `job-${job.id}-${Date.now()}`, tenantId: job.tenantId || DEFAULT_TENANT, fileName: result.sourceLabel, sourceLabel: result.sourceLabel, recordCount: result.eventCount || result.objectCount || 0 },
+      { rawEvidenceText: result.text, source: result.sourceLabel },
+      { subject: "scheduler", roles: ["admin"], tenantId: job.tenantId || DEFAULT_TENANT }
+    ).catch((error) => ({ mode: "error", error: error.message }));
+    result = { ...result, package: packageInfo };
     METRICS.jobsRun += 1;
     await appendRun({ ...result, tenantId: job.tenantId || DEFAULT_TENANT, jobId: job.id, jobName: job.name });
     await updateJob(job.id, { lastRun: new Date().toISOString(), lastStatus: "ok", lastError: "" });
@@ -833,6 +956,67 @@ async function runJob(job) {
     await appendAudit("job.run.failed", { jobId: job.id, jobName: job.name, error: error.message, tenantId: job.tenantId || DEFAULT_TENANT }, { subject: "scheduler", roles: ["admin"], tenantId: job.tenantId || DEFAULT_TENANT });
     throw error;
   }
+}
+
+async function startAsyncJobRun(job, principal = {}) {
+  const run = {
+    id: `jobrun-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    tenantId: principal.tenantId || job.tenantId || DEFAULT_TENANT,
+    jobId: job.id,
+    jobName: job.name,
+    sourceId: job.sourceId || "",
+    type: job.type,
+    status: "running",
+    message: "Ingest started",
+    progress: 5,
+    createdBy: principal.email || principal.name || principal.subject || "unknown",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  await putTenantObject("JOB_RUN", run.id, run, run.tenantId, JOB_RUNS_FILE);
+  METRICS.asyncJobRuns += 1;
+  setTimeout(() => {
+    runJob(job)
+      .then((result) => completeAsyncJobRun(run, result, principal))
+      .catch((error) => failAsyncJobRun(run, error, principal));
+  }, 0);
+  return run;
+}
+
+async function completeAsyncJobRun(run, result, principal = {}) {
+  const packageInfo = result.package || null;
+  const updated = {
+    ...run,
+    status: "completed",
+    message: `Imported ${result.eventCount ?? result.objectCount ?? 0} ${result.source === "s3" ? "objects" : "events"}`,
+    progress: 100,
+    sourceLabel: result.sourceLabel,
+    result: {
+      source: result.source,
+      sourceLabel: result.sourceLabel,
+      objectCount: result.objectCount,
+      eventCount: result.eventCount,
+      importedAt: result.importedAt
+    },
+    package: packageInfo,
+    completedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  await putTenantObject("JOB_RUN", updated.id, updated, updated.tenantId, JOB_RUNS_FILE);
+  await appendAudit("job.run.async.completed", { jobRunId: updated.id, jobId: updated.jobId, packageUri: packageInfo?.uri || "", tenantId: updated.tenantId }, { ...principal, tenantId: updated.tenantId });
+}
+
+async function failAsyncJobRun(run, error, principal = {}) {
+  const updated = {
+    ...run,
+    status: "failed",
+    message: error.message || "Ingest failed",
+    progress: 100,
+    failedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  await putTenantObject("JOB_RUN", updated.id, updated, updated.tenantId, JOB_RUNS_FILE);
+  await appendAudit("job.run.async.failed", { jobRunId: updated.id, jobId: updated.jobId, error: updated.message, tenantId: updated.tenantId }, { ...principal, tenantId: updated.tenantId });
 }
 
 async function restoreSchedules() {
@@ -949,8 +1133,106 @@ function normalizeSource(body = {}, principal = {}) {
     account: String(body.account || ""),
     region: String(body.region || ""),
     scope,
+    ownerUserId: String(body.ownerUserId || ""),
+    ownerName: String(body.ownerName || ""),
     createdAt: body.createdAt || now,
     updatedAt: now
+  };
+}
+
+function normalizeTenantUser(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const email = String(body.email || "").trim().toLowerCase();
+  const name = String(body.name || email || "").trim();
+  const role = ["admin", "analyst", "viewer"].includes(body.role) ? body.role : "viewer";
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("A valid user email is required");
+  return {
+    id: String(body.id || email),
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    name,
+    email,
+    role,
+    status: ["active", "invited", "disabled"].includes(body.status) ? body.status : "active",
+    sourceIds: Array.isArray(body.sourceIds) ? body.sourceIds.map(String).slice(0, 100) : [],
+    createdAt: body.createdAt || now,
+    updatedAt: now
+  };
+}
+
+async function assignSourceOwner(sourceId, ownerId, principal) {
+  if (!sourceId) throw new Error("Source ID is required");
+  const source = await getTenantObject("SOURCE", sourceId, principal.tenantId, SOURCES_FILE);
+  if (!source) throw new Error("Managed source not found");
+  const owner = ownerId ? await getTenantObject("TENANT_USER", ownerId, principal.tenantId, TENANT_USERS_FILE) : null;
+  if (ownerId && !owner) throw new Error("Tenant user not found");
+  const updated = {
+    ...source,
+    ownerUserId: owner?.id || "",
+    ownerName: owner?.name || owner?.email || "",
+    updatedAt: new Date().toISOString()
+  };
+  await putTenantObject("SOURCE", updated.id, updated, principal.tenantId, SOURCES_FILE);
+  await appendAudit("source.owner.assigned", { sourceId: updated.id, ownerUserId: updated.ownerUserId, tenantId: principal.tenantId }, principal);
+  return updated;
+}
+
+async function persistEvidencePackage(run, body = {}, principal = {}) {
+  const rawEvidenceText = String(body.rawEvidenceText || body.evidenceText || body.text || "");
+  const hasRawEvidence = rawEvidenceText.length > 0;
+  const packageId = run.id || `evidence-${Date.now()}`;
+  const safePackageId = String(packageId).replace(/[^a-zA-Z0-9_.-]+/g, "-").slice(0, 160);
+  const tenantId = principal.tenantId || run.tenantId || DEFAULT_TENANT;
+  const retentionUntil = new Date(Date.now() + EVIDENCE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const packageBody = {
+    product: "SignalPrism NDR",
+    packageId,
+    tenantId,
+    source: run.sourceLabel || run.fileName || body.source || "",
+    createdAt: new Date().toISOString(),
+    retentionUntil,
+    retentionDays: EVIDENCE_RETENTION_DAYS,
+    rawEvidenceText,
+    recordsSample: Array.isArray(body.records) ? body.records.slice(0, 500) : run.recordsSample || [],
+    analysisSummary: run.analysisSummary || null
+  };
+  const payload = JSON.stringify(packageBody, null, 2);
+  const key = `${EVIDENCE_PREFIX.replace(/^\/+|\/+$/g, "")}/${sanitizeTenantId(tenantId)}/${safePackageId}.json`;
+  if (EVIDENCE_BUCKET) {
+    requireAws(EVIDENCE_REGION);
+    const headers = {
+      "content-type": "application/json",
+      "x-amz-object-lock-mode": EVIDENCE_OBJECT_LOCK_MODE,
+      "x-amz-object-lock-retain-until-date": retentionUntil
+    };
+    await awsRequest({
+      service: "s3",
+      region: EVIDENCE_REGION,
+      method: "PUT",
+      host: `${EVIDENCE_BUCKET}.s3.${EVIDENCE_REGION}.amazonaws.com`,
+      path: `/${encodePath(key)}`,
+      headers,
+      body: payload
+    });
+    return {
+      mode: "s3",
+      uri: `s3://${EVIDENCE_BUCKET}/${key}`,
+      retentionUntil,
+      retentionMode: EVIDENCE_OBJECT_LOCK_MODE,
+      bytes: Buffer.byteLength(payload),
+      rawEvidenceStored: hasRawEvidence
+    };
+  }
+  const tenantDir = join(EVIDENCE_PACKAGES_DIR, sanitizeTenantId(tenantId));
+  await mkdir(tenantDir, { recursive: true });
+  const localPath = join(tenantDir, `${safePackageId}.json`);
+  await writeFile(localPath, payload);
+  return {
+    mode: "local",
+    uri: localPath,
+    retentionUntil,
+    retentionMode: "metadata",
+    bytes: Buffer.byteLength(payload),
+    rawEvidenceStored: hasRawEvidence
   };
 }
 
@@ -1365,6 +1647,9 @@ function sendMetrics(res) {
     "# HELP ndr_jobs_run_total Total scheduled/manual job runs",
     "# TYPE ndr_jobs_run_total counter",
     `ndr_jobs_run_total ${METRICS.jobsRun}`,
+    "# HELP ndr_async_job_runs_total Total async ingest job runs started",
+    "# TYPE ndr_async_job_runs_total counter",
+    `ndr_async_job_runs_total ${METRICS.asyncJobRuns}`,
     "# HELP ndr_uptime_seconds Process uptime",
     "# TYPE ndr_uptime_seconds gauge",
     `ndr_uptime_seconds ${uptime}`
