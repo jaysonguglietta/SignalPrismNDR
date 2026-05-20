@@ -43,7 +43,7 @@ The browser uses Authorization Code with PKCE through `/api/auth/token`; do not 
 
 - Flow logs can contain internal IPs, account IDs, ENIs, and infrastructure metadata.
 - Redacted export is available in the UI.
-- Tenant workspaces, cases, evidence-run samples, managed sources, tenant users, enterprise settings, detection rules, jobs, async job runs, and ingest metadata are stored under `NDR_DATA_DIR` for local mode or in DynamoDB when `NDR_STORE=dynamodb`.
+- Tenant workspaces, cases, evidence-run samples, managed sources, tenant users, enterprise settings, detection rules, enterprise artifacts, jobs, async job runs, and ingest metadata are stored under `NDR_DATA_DIR` for local mode or in DynamoDB when `NDR_STORE=dynamodb`.
 - Full raw evidence packages are stored separately from evidence-run metadata. Local mode writes them under `.ndr-data/evidence-packages/`; production should use an S3 bucket with Object Lock enabled through `NDR_EVIDENCE_BUCKET`.
 - Audit records are append-only NDJSON in local mode and append-only DynamoDB records in DynamoDB mode. Each record includes `retentionUntil` based on `NDR_AUDIT_RETENTION_DAYS`.
 - The Terraform production stack creates an S3 audit bucket with Object Lock COMPLIANCE retention for immutable exported audit evidence.

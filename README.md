@@ -179,6 +179,9 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, prefixes, direct ingest, and schedule creation.
 - Tenant admin screen for users, roles, and managed source ownership.
 - Enterprise command center for readiness scoring, source discovery, detection rule lifecycle, asset context, policy exposure review, quality metrics, and governance controls.
+- Evidence-cited investigator copilot, source-health drift checks, threat-intelligence enrichment, and explainable entity risk scoring.
+- Detection-as-code bundle export with rule quality scoring, draft/test/production promotion, cloning, approval metadata, and rollback-ready versions.
+- Response playbook runs, evidence vault bundle manifests, stakeholder report modes, tenant admin readiness, and replay timeline exports.
 - Security Lake/SIEM OCSF NDJSON export with backend audit manifest support.
 - Full raw evidence packages in local package storage or S3 Object Lock storage with retention metadata.
 - Async CloudWatch/S3 import runs with polling status and completion/failure notifications.
@@ -203,6 +206,11 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - `AsyncJobRun`: queued, running, completed, or failed import execution with progress, status message, and evidence package reference.
 - `DetectionRule`: custom analytic with hunt query, severity, ATT&CK mapping, owner, status, and test history.
 - `EnterpriseSettings`: tenant governance, Security Lake/SIEM, retention, and data platform posture.
+- `EnterpriseArtifact`: tenant-scoped artifact for copilot notes, threat-intel imports, playbook runs, vault bundles, reports, and export manifests.
+- `ThreatIntelIndicator`: IP/domain reputation record with severity, confidence, source, and label.
+- `PlaybookRun`: case-linked response plan with template, step owners, status, and created time.
+- `EvidenceVaultBundle`: chain-of-custody manifest with retention deadline, legal hold flag, counts, hash, and storage posture.
+- `EnterpriseReport`: generated stakeholder report for analyst, executive, compliance, or manager views.
 - `AssetContext`: owner, environment, criticality, account, role, IP, ENI, and instance metadata.
 - `PolicyFinding`: public exposure, sensitive access, and high-volume egress review finding.
 - `AuditRecord`: append-only actor, role, action, details, creation time, and retention deadline.

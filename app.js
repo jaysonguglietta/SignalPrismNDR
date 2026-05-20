@@ -131,11 +131,17 @@ const STORAGE_KEYS = {
   sources: "ndrFlowConsole.sources.v1",
   tenantUsers: "ndrFlowConsole.tenantUsers.v1",
   seenJobRuns: "ndrFlowConsole.seenJobRuns.v1",
+  jobRuns: "ndrFlowConsole.jobRuns.v1",
   detectionRules: "ndrFlowConsole.detectionRules.v1",
   enterpriseSettings: "ndrFlowConsole.enterpriseSettings.v1",
   assetContext: "ndrFlowConsole.assetContext.v1",
   policyFindings: "ndrFlowConsole.policyFindings.v1",
   securityLakeManifest: "ndrFlowConsole.securityLakeManifest.v1",
+  threatIntel: "ndrFlowConsole.threatIntel.v1",
+  copilotNotes: "ndrFlowConsole.copilotNotes.v1",
+  playbookRuns: "ndrFlowConsole.playbookRuns.v1",
+  evidenceVault: "ndrFlowConsole.evidenceVault.v1",
+  enterpriseReports: "ndrFlowConsole.enterpriseReports.v1",
   enrichment: "ndrFlowConsole.enrichment.v1"
 };
 
@@ -342,8 +348,16 @@ function cacheElements() {
     "replayEventList",
     "enterpriseReadinessLabel",
     "enterpriseMetricGrid",
+    "copilotQuestionInput",
+    "generateCitedCopilotButton",
+    "copilotCitationList",
+    "sourceHealthList",
     "discoverSourcesButton",
     "enterpriseCoverageList",
+    "threatIntelInput",
+    "applyThreatIntelButton",
+    "threatIntelList",
+    "entityRiskScoringList",
     "detectionRuleIdInput",
     "detectionRuleNameInput",
     "detectionRuleQueryInput",
@@ -357,6 +371,8 @@ function cacheElements() {
     "detectionRuleResultList",
     "detectionRuleCountLabel",
     "detectionRuleList",
+    "exportDetectionAsCodeButton",
+    "detectionAsCodeList",
     "securityLakeBucketInput",
     "securityLakePrefixInput",
     "siemTargetInput",
@@ -369,10 +385,16 @@ function cacheElements() {
     "assetContextList",
     "exportGraphButton",
     "investigationGraphList",
+    "exportReplayTimelineButton",
+    "replayTimelineList",
     "policyInput",
     "analyzePolicyButton",
     "policyFindingList",
     "incidentOpsList",
+    "playbookCaseSelect",
+    "playbookTemplateSelect",
+    "createPlaybookRunButton",
+    "playbookRunList",
     "qualityDashboardList",
     "retentionDaysInput",
     "legalHoldInput",
@@ -381,6 +403,12 @@ function cacheElements() {
     "queryEngineInput",
     "saveGovernanceButton",
     "governanceReadinessList",
+    "createEvidenceVaultButton",
+    "evidenceVaultList",
+    "reportModeSelect",
+    "generateEnterpriseReportButton",
+    "enterpriseReportPanel",
+    "enterpriseAdminList",
     "toastRegion",
     "confirmDialog",
     "confirmTitle",
@@ -578,23 +606,34 @@ function wireEvents() {
     if (del) deleteTenantUser(del.dataset.deleteTenantUser);
   });
   els.assignSourceOwnerButton.addEventListener("click", assignSourceOwner);
+  els.generateCitedCopilotButton.addEventListener("click", generateCitedCopilotAnswer);
   els.discoverSourcesButton.addEventListener("click", discoverSourcesFromEvidence);
+  els.applyThreatIntelButton.addEventListener("click", applyThreatIntelInput);
   els.testDetectionRuleButton.addEventListener("click", testDetectionRuleForm);
   els.saveDetectionRuleButton.addEventListener("click", saveDetectionRuleForm);
   els.detectionRuleList.addEventListener("click", (event) => {
     const edit = event.target.closest("[data-edit-rule]");
     const test = event.target.closest("[data-test-rule]");
     const del = event.target.closest("[data-delete-rule]");
+    const promote = event.target.closest("[data-promote-rule]");
+    const clone = event.target.closest("[data-clone-rule]");
     if (edit) editDetectionRule(edit.dataset.editRule);
     if (test) testDetectionRuleById(test.dataset.testRule);
     if (del) deleteDetectionRuleById(del.dataset.deleteRule);
+    if (promote) promoteDetectionRule(promote.dataset.promoteRule);
+    if (clone) cloneDetectionRule(clone.dataset.cloneRule);
   });
+  els.exportDetectionAsCodeButton.addEventListener("click", exportDetectionAsCodeBundle);
   els.saveIntegrationButton.addEventListener("click", saveEnterpriseIntegration);
   els.exportSecurityLakeButton.addEventListener("click", exportSecurityLakeOcsf);
   els.applyAssetContextButton.addEventListener("click", applyAssetContextInput);
   els.exportGraphButton.addEventListener("click", exportInvestigationGraph);
+  els.exportReplayTimelineButton.addEventListener("click", exportReplayTimeline);
   els.analyzePolicyButton.addEventListener("click", analyzePolicyInput);
+  els.createPlaybookRunButton.addEventListener("click", createPlaybookRun);
   els.saveGovernanceButton.addEventListener("click", saveGovernanceControls);
+  els.createEvidenceVaultButton.addEventListener("click", createEvidenceVaultBundle);
+  els.generateEnterpriseReportButton.addEventListener("click", generateEnterpriseReport);
   els.createCaseFromTopDetectionButton.addEventListener("click", createCaseFromTopDetection);
   els.saveCaseButton.addEventListener("click", saveCaseForm);
   els.caseList.addEventListener("click", (event) => {
@@ -3220,6 +3259,7 @@ async function refreshJobRuns(silent = false) {
   if (!backendApi || !els.backendJobRunsList) return;
   try {
     const runs = await backendApi.listJobRuns();
+    saveJson(STORAGE_KEYS.jobRuns, runs);
     renderJobRuns(runs);
     notifyCompletedJobRuns(runs, silent);
   } catch (error) {
@@ -3949,14 +3989,33 @@ async function refreshEnterpriseFromBackend() {
     return;
   }
   try {
-    const [settings, rules] = await Promise.all([backendApi.enterpriseSettings(), backendApi.listDetectionRules()]);
+    const [settings, rules, artifacts] = await Promise.all([
+      backendApi.enterpriseSettings(),
+      backendApi.listDetectionRules(),
+      backendApi.listEnterpriseArtifacts ? backendApi.listEnterpriseArtifacts() : Promise.resolve([])
+    ]);
     saveJson(STORAGE_KEYS.enterpriseSettings, settings);
     saveJson(STORAGE_KEYS.detectionRules, rules.length ? rules : enterpriseDefaultRules());
+    applyEnterpriseArtifactsFromBackend(artifacts);
   } catch (error) {
     ensureDefaultDetectionRules();
     if (state.backend.online) showToast(`Enterprise sync unavailable: ${error.message}`, "warn");
   }
   renderEnterprise();
+}
+
+function applyEnterpriseArtifactsFromBackend(artifacts = []) {
+  const grouped = {
+    THREAT_INTEL: STORAGE_KEYS.threatIntel,
+    COPILOT_NOTE: STORAGE_KEYS.copilotNotes,
+    PLAYBOOK_RUN: STORAGE_KEYS.playbookRuns,
+    EVIDENCE_VAULT_BUNDLE: STORAGE_KEYS.evidenceVault,
+    ENTERPRISE_REPORT: STORAGE_KEYS.enterpriseReports
+  };
+  Object.entries(grouped).forEach(([type, key]) => {
+    const values = artifacts.filter((artifact) => artifact.type === type).map((artifact) => artifact.payload || artifact);
+    if (values.length) saveJson(key, type === "THREAT_INTEL" ? mergeThreatIntelValues(values) : values.slice(0, 25));
+  });
 }
 
 function ensureDefaultDetectionRules() {
@@ -4046,17 +4105,29 @@ async function renderEnterprise() {
     metricTemplate("Source ownership", `${readiness.ownerCoverage}%`, `${formatNumber(readiness.sourcesOwned)} of ${formatNumber(readiness.sourcesTotal)} sources`),
     metricTemplate("Rule coverage", formatNumber(readiness.rulesProduction), `${formatNumber(readiness.rulesTotal)} analytics`),
     metricTemplate("Open incidents", formatNumber(readiness.openCases), `${formatNumber(readiness.highCases)} high severity`),
-    metricTemplate("OCSF pipeline", settings.securityLake?.bucket ? "Ready" : "Draft", settings.siem?.target || "Security Lake")
+    metricTemplate("OCSF pipeline", settings.securityLake?.bucket ? "Ready" : "Draft", settings.siem?.target || "Security Lake"),
+    metricTemplate("Threat intel", formatNumber(readiness.threatIndicators), "active indicators"),
+    metricTemplate("Vault bundles", formatNumber(readiness.vaultBundles), "retained exports")
   ].join("");
+  renderCitedCopilot();
+  renderSourceHealth();
   renderEnterpriseCoverage();
+  renderThreatIntel();
+  renderEntityRiskScoring();
   renderDetectionRules();
+  renderDetectionAsCode();
   renderSecurityLakeManifest();
   renderAssetContext();
   renderInvestigationGraph();
+  renderReplayTimeline();
   renderPolicyFindings();
   renderIncidentOps(cases);
+  renderPlaybooks(cases);
   renderQualityDashboard(cases);
   renderGovernanceReadiness(readiness, settings);
+  renderEvidenceVault();
+  renderEnterpriseReport();
+  renderEnterpriseAdminReadiness();
 }
 
 function syncEnterpriseInputs(settings) {
@@ -4076,6 +4147,8 @@ function buildEnterpriseReadiness(cases = []) {
   const sources = loadJson(STORAGE_KEYS.sources, []);
   const rules = loadJson(STORAGE_KEYS.detectionRules, []);
   const assets = Object.values(loadJson(STORAGE_KEYS.assetContext, {}));
+  const threatIntel = Object.values(loadJson(STORAGE_KEYS.threatIntel, {}));
+  const vaultBundles = loadJson(STORAGE_KEYS.evidenceVault, []);
   const settings = enterpriseSettingsValue();
   const sourcesOwned = sources.filter((source) => source.ownerName || source.ownerUserId).length;
   const rulesProduction = rules.filter((rule) => rule.enabled !== false && rule.status === "production").length;
@@ -4087,6 +4160,7 @@ function buildEnterpriseReadiness(cases = []) {
   if (!rulesProduction) blockers.push("No production rules");
   if (!settings.securityLake?.bucket) blockers.push("Security Lake bucket not configured");
   if (!assets.length) blockers.push("No asset context");
+  if (!threatIntel.length) blockers.push("Threat intelligence not connected");
   if (!settings.governance?.exportApprovalRequired) blockers.push("Export approval disabled");
   const score = Math.max(0, Math.min(100, 100 - blockers.length * 14 - (state.errors.length ? 8 : 0)));
   return {
@@ -4098,7 +4172,9 @@ function buildEnterpriseReadiness(cases = []) {
     rulesProduction,
     rulesTotal: rules.length,
     openCases,
-    highCases
+    highCases,
+    threatIndicators: threatIntel.length,
+    vaultBundles: vaultBundles.length
   };
 }
 
@@ -4118,6 +4194,122 @@ function renderEnterpriseCoverage() {
 
 function enterpriseIssue(title, detail, tone = "ok") {
   return `<div class="issue-item ${tone === "warn" ? "warning" : ""}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div>`;
+}
+
+async function persistEnterpriseArtifact(type, title, payload, status = "active") {
+  const artifact = {
+    id: `${String(type).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`,
+    type,
+    title,
+    status,
+    payload,
+    createdAt: new Date().toISOString()
+  };
+  try {
+    if (backendApi?.saveEnterpriseArtifact) return await backendApi.saveEnterpriseArtifact(artifact);
+  } catch (error) {
+    if (state.backend.online) showToast(`Artifact kept locally: ${error.message}`, "warn");
+  }
+  return artifact;
+}
+
+function renderCitedCopilot() {
+  const notes = loadJson(STORAGE_KEYS.copilotNotes, []);
+  if (!notes.length) {
+    els.copilotCitationList.innerHTML = `<div class="empty-state"><strong>No cited answer yet</strong><span>Ask a question to generate a deterministic investigation answer with evidence references.</span></div>`;
+    return;
+  }
+  const note = notes[0];
+  els.copilotCitationList.innerHTML = `<div class="issue-item">
+    <strong>${escapeHtml(note.question || "Investigation answer")}</strong>
+    <span>${escapeHtml(note.answer || "")}</span>
+  </div>${(note.citations || [])
+    .map((citation) => `<div class="issue-item"><strong>${escapeHtml(citation.ref)}</strong><span>${escapeHtml(citation.detail)}</span></div>`)
+    .join("")}`;
+}
+
+async function generateCitedCopilotAnswer() {
+  if (!state.records.length && !state.analysis?.detections?.length) return setInputMessage("Analyze evidence before generating a cited answer.");
+  const question = els.copilotQuestionInput.value.trim() || "Which entities should I investigate first and why?";
+  const cases = await listCaseRecords().catch(() => []);
+  const note = buildCitedInvestigationAnswer({
+    question,
+    analysis: state.analysis,
+    records: state.filtered.length ? state.filtered : state.records,
+    cases,
+    assets: loadJson(STORAGE_KEYS.assetContext, {}),
+    threatIntel: loadJson(STORAGE_KEYS.threatIntel, {})
+  });
+  await persistEnterpriseArtifact("COPILOT_NOTE", question, note);
+  const notes = [note, ...loadJson(STORAGE_KEYS.copilotNotes, [])].slice(0, 12);
+  saveJson(STORAGE_KEYS.copilotNotes, notes);
+  renderCitedCopilot();
+  showToast("Evidence-cited copilot answer generated.");
+}
+
+function buildCitedInvestigationAnswer({ question = "", analysis = null, records = [], cases = [], assets = {}, threatIntel = {} } = {}) {
+  const detections = analysis?.detections || [];
+  const topDetection = detections.find((item) => item.severity === "high") || detections[0] || null;
+  const topEntity = topDetection?.entity || analysis?.entityRisk?.[0]?.entity || records.find((record) => isPrivateIp(record.source))?.source || records[0]?.source || "unknown";
+  const entityRecords = records.filter((record) => record.source === topEntity || record.destination === topEntity).slice(0, 5);
+  const intelMatches = records
+    .flatMap((record) => [record.source, record.destination])
+    .filter((value, index, values) => value && value !== "-" && values.indexOf(value) === index && threatIntel[value])
+    .slice(0, 5);
+  const asset = assets[topEntity] || Object.values(assets).find((item) => item.ip === topEntity || item.eni === topEntity || item.instance === topEntity) || null;
+  const citations = [];
+  if (topDetection) citations.push({ ref: `Detection ${topDetection.id || "top"}`, detail: `${topDetection.title} on ${topDetection.entity || "network entity"} with ${Math.round((topDetection.confidence || 0) * 100)}% confidence.` });
+  entityRecords.forEach((record, index) => {
+    citations.push({ ref: `Flow ${index + 1}`, detail: `${formatEndpoint(record.source, record.srcPort)} -> ${formatEndpoint(record.destination, record.dstPort)} ${record.action} ${classifyApplication(record)} ${formatBytes(record.bytes)} at ${formatDate(record.start)}.` });
+  });
+  intelMatches.forEach((indicator) => citations.push({ ref: `Threat intel ${indicator}`, detail: `${threatIntel[indicator].label || "Known indicator"} from ${threatIntel[indicator].source || "threat feed"} with ${threatIntel[indicator].severity || "medium"} severity.` }));
+  if (asset) citations.push({ ref: `Asset ${asset.asset || asset.key}`, detail: `${asset.owner || "Unknown owner"} owns ${asset.environment || "unknown environment"} asset with ${asset.criticality || "medium"} criticality.` });
+  if (cases.length) citations.push({ ref: "Case context", detail: `${cases.filter((item) => item.status !== "Closed").length} open cases and ${cases.filter((item) => item.severity === "high").length} high-severity cases in this tenant.` });
+  const answerParts = [
+    topDetection ? `${topEntity} should be investigated first because ${topDetection.title.toLowerCase()} is present.` : `${topEntity} is the best starting point because it appears in the current evidence set.`,
+    asset ? `Business context raises priority: ${asset.asset || asset.key} is ${asset.criticality || "medium"} criticality and owned by ${asset.owner || "an unknown owner"}.` : "Add asset ownership to improve prioritization.",
+    intelMatches.length ? `Threat intelligence matched ${intelMatches.length} observed indicator${intelMatches.length === 1 ? "" : "s"}.` : "No threat-intelligence match is loaded for the observed indicators.",
+    "Validate the cited flows, confirm expected service ownership, then create or update a case with containment steps."
+  ];
+  return {
+    id: `copilot-note-${Date.now()}`,
+    question,
+    answer: answerParts.join(" "),
+    citations: citations.slice(0, 10),
+    createdAt: new Date().toISOString()
+  };
+}
+
+function renderSourceHealth() {
+  const health = buildSourceHealth(loadJson(STORAGE_KEYS.sources, []), loadJson(STORAGE_KEYS.jobRuns, []), state.records, state.errors);
+  els.sourceHealthList.innerHTML = health.length
+    ? health.map((item) => enterpriseIssue(item.title, item.detail, item.tone)).join("")
+    : `<div class="empty-state"><strong>No managed sources</strong><span>Add S3 or CloudWatch sources to monitor freshness and ownership.</span></div>`;
+}
+
+function buildSourceHealth(sources = [], jobRuns = [], records = [], errors = []) {
+  if (!sources.length) return [];
+  const latestRunBySource = new Map();
+  jobRuns.forEach((run) => {
+    const key = run.sourceId || run.jobId || "";
+    if (!key) return;
+    const previous = latestRunBySource.get(key);
+    if (!previous || String(run.updatedAt || run.createdAt || "").localeCompare(String(previous.updatedAt || previous.createdAt || "")) > 0) latestRunBySource.set(key, run);
+  });
+  const observedEnis = new Set(records.map((record) => record.interfaceId).filter(Boolean));
+  return sources.slice(0, 6).map((source) => {
+    const run = latestRunBySource.get(source.id) || null;
+    const observedScope = (source.scope || []).some((item) => observedEnis.has(item));
+    const stale = run?.updatedAt ? Date.now() - Date.parse(run.updatedAt) > 24 * 60 * 60 * 1000 : true;
+    const missingOwner = !source.ownerName && !source.ownerUserId;
+    const tone = run?.status === "failed" || missingOwner || (stale && !observedScope) || errors.length ? "warn" : "ok";
+    const detail = [
+      run ? `${run.status} ${run.message || ""}` : "No async import recorded",
+      source.ownerName || source.ownerUserId ? `owner ${source.ownerName || source.ownerUserId}` : "owner missing",
+      observedScope ? "scope observed in evidence" : "scope not observed"
+    ].join(" - ");
+    return { title: source.name, detail, tone };
+  });
 }
 
 async function discoverSourcesFromEvidence() {
@@ -4172,6 +4364,136 @@ function buildDiscoveredSourcesFromEvidence() {
     .filter((source) => source.scope.length);
 }
 
+function mergeThreatIntelValues(values = []) {
+  const merged = {};
+  values.forEach((value) => {
+    const indicators = Array.isArray(value?.indicators) ? value.indicators : Array.isArray(value) ? value : Object.values(value || {});
+    indicators.forEach((indicator) => {
+      const normalized = normalizeThreatIntel(indicator);
+      if (normalized.indicator) merged[normalized.indicator] = normalized;
+    });
+  });
+  return merged;
+}
+
+function applyThreatIntelInput() {
+  const parsed = parseThreatIntel(els.threatIntelInput.value);
+  if (!Object.keys(parsed).length) return setInputMessage("No threat intelligence indicators were recognized. Use JSONL or CSV with indicator/ip/domain fields.");
+  const current = loadJson(STORAGE_KEYS.threatIntel, {});
+  const merged = { ...current, ...parsed };
+  saveJson(STORAGE_KEYS.threatIntel, merged);
+  persistEnterpriseArtifact("THREAT_INTEL", "Threat intelligence import", { indicators: Object.values(parsed) });
+  renderEnterprise();
+  showToast(`${formatNumber(Object.keys(parsed).length)} threat indicator${Object.keys(parsed).length === 1 ? "" : "s"} applied.`);
+}
+
+function parseThreatIntel(text) {
+  const rows = {};
+  let header = null;
+  String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line, index) => {
+      let item = null;
+      if (line.startsWith("{")) {
+        try {
+          item = JSON.parse(line);
+        } catch {
+          item = null;
+        }
+      } else {
+        const values = parseCsvLine(line);
+        if (index === 0 && values.some((value) => /indicator|ip|domain|severity|confidence/i.test(value))) {
+          header = values.map((value) => value.trim());
+          return;
+        }
+        if (header) {
+          item = {};
+          header.forEach((field, fieldIndex) => {
+            item[field] = values[fieldIndex];
+          });
+        }
+      }
+      const normalized = normalizeThreatIntel(item || {});
+      if (normalized.indicator) rows[normalized.indicator] = normalized;
+    });
+  return rows;
+}
+
+function normalizeThreatIntel(item = {}) {
+  const indicator = String(item.indicator || item.ip || item.domain || item.value || "").trim();
+  if (!indicator) return { indicator: "" };
+  const severity = ["critical", "high", "medium", "low"].includes(String(item.severity || "").toLowerCase()) ? String(item.severity).toLowerCase() : "medium";
+  return {
+    indicator,
+    type: item.type || (indicator.includes(".") && !/^\d+\.\d+\.\d+\.\d+$/.test(indicator) ? "domain" : "ip"),
+    severity,
+    label: String(item.label || item.threat || item.description || "Threat indicator").trim(),
+    source: String(item.source || item.feed || "manual import").trim(),
+    confidence: Math.max(0, Math.min(100, Number(item.confidence || item.score || (severity === "high" || severity === "critical" ? 85 : 55)))),
+    firstSeen: item.firstSeen || item.first_seen || "",
+    lastSeen: item.lastSeen || item.last_seen || "",
+    importedAt: new Date().toISOString()
+  };
+}
+
+function renderThreatIntel() {
+  const intel = Object.values(loadJson(STORAGE_KEYS.threatIntel, {}));
+  const observed = new Set(state.records.flatMap((record) => [record.source, record.destination]));
+  if (!intel.length) {
+    els.threatIntelList.innerHTML = `<div class="empty-state"><strong>No threat intelligence loaded</strong><span>Paste an indicator feed to enrich external IPs and risk scoring.</span></div>`;
+    return;
+  }
+  const matches = intel.filter((indicator) => observed.has(indicator.indicator));
+  els.threatIntelList.innerHTML = [
+    enterpriseIssue("Loaded indicators", `${formatNumber(intel.length)} active indicators from ${formatNumber(new Set(intel.map((item) => item.source)).size)} sources`, "ok"),
+    enterpriseIssue("Observed matches", matches.length ? `${formatNumber(matches.length)} indicators appear in current evidence` : "No loaded indicators match current evidence", matches.length ? "warn" : "ok"),
+    ...matches.slice(0, 5).map((indicator) => enterpriseIssue(indicator.indicator, `${indicator.label} - ${indicator.severity} - ${indicator.confidence}% confidence`, "warn"))
+  ].join("");
+}
+
+function buildEntityRiskScores(records = [], analysis = null, assets = {}, threatIntel = {}) {
+  const scores = new Map();
+  const bump = (entity, points, reason) => {
+    if (!entity || entity === "-") return;
+    if (!scores.has(entity)) scores.set(entity, { entity, score: 0, reasons: new Set(), asset: assets[entity] || null, intel: threatIntel[entity] || null });
+    const current = scores.get(entity);
+    current.score += points;
+    current.reasons.add(reason);
+  };
+  records.forEach((record) => {
+    const sensitive = SENSITIVE_PORTS.has(record.dstPort);
+    if (record.action === "REJECT" && isPublicIp(record.source) && sensitive) bump(record.destination, 14, `public ${SENSITIVE_PORTS.get(record.dstPort)} probing`);
+    if (record.action === "ACCEPT" && isPrivateIp(record.source) && isPrivateIp(record.destination) && sensitive) bump(record.destination, 22, "accepted sensitive lateral access");
+    if (record.action === "ACCEPT" && isPrivateIp(record.source) && isPublicIp(record.destination) && record.bytes > 1_000_000) bump(record.source, 18, "large external egress");
+    if (threatIntel[record.source]) bump(record.destination, threatIntel[record.source].severity === "high" ? 28 : 18, `matched intel ${record.source}`);
+    if (threatIntel[record.destination]) bump(record.source, threatIntel[record.destination].severity === "high" ? 28 : 18, `matched intel ${record.destination}`);
+  });
+  (analysis?.detections || []).forEach((detection) => bump(detection.entity, detection.severity === "high" ? 30 : detection.severity === "medium" ? 18 : 8, detection.title));
+  Object.values(assets || {}).forEach((asset) => {
+    const key = asset.ip || asset.eni || asset.instance || asset.key;
+    if (asset.criticality === "high") bump(key, 12, "high-criticality asset");
+  });
+  return [...scores.values()]
+    .map((item) => ({ ...item, score: Math.max(0, Math.min(100, item.score)), reasons: [...item.reasons].slice(0, 4) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
+}
+
+function renderEntityRiskScoring() {
+  const scores = buildEntityRiskScores(state.records, state.analysis, loadJson(STORAGE_KEYS.assetContext, {}), loadJson(STORAGE_KEYS.threatIntel, {}));
+  els.entityRiskScoringList.innerHTML = scores.length
+    ? scores.slice(0, 6).map((item) => `<article class="entity-card">
+      <div class="entity-name">${escapeHtml(item.entity)}</div>
+      <div class="risk-score ${riskClass(item.score)}">${formatNumber(item.score)}</div>
+      <div class="entity-meta">
+        ${item.reasons.map((reason) => `<span class="tag">${escapeHtml(reason)}</span>`).join("")}
+      </div>
+    </article>`).join("")
+    : `<div class="empty-state"><strong>No scored entities</strong><span>Analyze evidence and add asset or threat context to calculate risk.</span></div>`;
+}
+
 function detectionRulesValue() {
   ensureDefaultDetectionRules();
   return loadJson(STORAGE_KEYS.detectionRules, []);
@@ -4190,6 +4512,8 @@ function renderDetectionRules() {
             <span class="tag">${escapeHtml(rule.attackId || rule.tactic || "ATT&CK")}</span>
             <button class="mini-button" type="button" data-test-rule="${escapeHtml(rule.id)}">Test</button>
             <button class="mini-button" type="button" data-edit-rule="${escapeHtml(rule.id)}">Edit</button>
+            <button class="mini-button" type="button" data-promote-rule="${escapeHtml(rule.id)}">Promote</button>
+            <button class="mini-button" type="button" data-clone-rule="${escapeHtml(rule.id)}">Clone</button>
             ${rule.builtIn ? "" : `<button class="mini-button danger" type="button" data-delete-rule="${escapeHtml(rule.id)}">Delete</button>`}
           </div>
         </article>`)
@@ -4316,6 +4640,115 @@ function deleteDetectionRuleById(id) {
       showToast("Detection rule deleted.");
     }
   });
+}
+
+async function promoteDetectionRule(id) {
+  const rule = detectionRulesValue().find((item) => item.id === id);
+  if (!rule) return;
+  const quality = scoreDetectionRuleQuality(rule);
+  const nextStatus = rule.status === "production" ? "retired" : rule.status === "test" && quality.score >= 70 ? "production" : "test";
+  const updated = {
+    ...rule,
+    status: nextStatus,
+    version: Number(rule.version || 1) + 1,
+    approvedBy: nextStatus === "production" ? state.backend.principal?.email || "local analyst" : rule.approvedBy || "",
+    approvedAt: nextStatus === "production" ? new Date().toISOString() : rule.approvedAt || "",
+    updatedAt: new Date().toISOString()
+  };
+  try {
+    if (backendApi && !updated.builtIn) await backendApi.saveDetectionRule(updated);
+  } catch (error) {
+    if (state.backend.online) showToast(`Rule promoted locally: ${error.message}`, "warn");
+  }
+  saveDetectionRuleLocal(updated);
+  renderEnterprise();
+  showToast(`Rule moved to ${nextStatus}.`);
+}
+
+function cloneDetectionRule(id) {
+  const rule = detectionRulesValue().find((item) => item.id === id);
+  if (!rule) return;
+  const clone = {
+    ...rule,
+    id: `rule-${Date.now()}`,
+    name: `${rule.name} copy`,
+    status: "draft",
+    builtIn: false,
+    version: 1,
+    approvedBy: "",
+    approvedAt: "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  saveDetectionRuleLocal(clone);
+  editDetectionRule(clone.id);
+  renderDetectionRules();
+  showToast("Detection rule cloned as draft.");
+}
+
+function scoreDetectionRuleQuality(rule = {}) {
+  let score = 20;
+  const gaps = [];
+  if (rule.query) score += 15;
+  else gaps.push("missing query");
+  if (rule.description && rule.description.length > 30) score += 12;
+  else gaps.push("thin description");
+  if (rule.attackId) score += 14;
+  else gaps.push("no ATT&CK technique");
+  if (rule.owner && rule.owner !== "unknown") score += 10;
+  else gaps.push("no owner");
+  if (Number(rule.testCount || 0) > 0) score += 14;
+  else gaps.push("no passing fixture");
+  if (rule.status === "production") score += 15;
+  else if (rule.status === "test") score += 8;
+  return { score: Math.max(0, Math.min(100, score)), gaps };
+}
+
+function renderDetectionAsCode() {
+  const rules = detectionRulesValue();
+  if (!rules.length) {
+    els.detectionAsCodeList.innerHTML = emptyState();
+    return;
+  }
+  const scored = rules.map((rule) => ({ rule, quality: scoreDetectionRuleQuality(rule) }));
+  const avg = Math.round(scored.reduce((sum, item) => sum + item.quality.score, 0) / scored.length);
+  const production = rules.filter((rule) => rule.status === "production").length;
+  const unmapped = rules.filter((rule) => !rule.attackId).length;
+  els.detectionAsCodeList.innerHTML = [
+    enterpriseIssue("Average quality", `${avg}% across ${formatNumber(rules.length)} rules`, avg >= 75 ? "ok" : "warn"),
+    enterpriseIssue("Production coverage", `${formatNumber(production)} production rules`, production ? "ok" : "warn"),
+    enterpriseIssue("Mapping gaps", unmapped ? `${formatNumber(unmapped)} rules need ATT&CK mapping` : "All rules mapped", unmapped ? "warn" : "ok"),
+    ...scored.slice(0, 4).map((item) => enterpriseIssue(item.rule.name, `${item.quality.score}% quality - v${item.rule.version || 1} - ${item.rule.status || "draft"}`, item.quality.score >= 70 ? "ok" : "warn"))
+  ].join("");
+}
+
+function buildDetectionAsCodeBundle(rules = []) {
+  return {
+    product: "SignalPrism NDR",
+    schema: "signalprism.detections.v1",
+    exportedAt: new Date().toISOString(),
+    rules: rules.map((rule) => ({
+      id: rule.id,
+      name: rule.name,
+      version: rule.version || 1,
+      status: rule.status || "draft",
+      enabled: rule.enabled !== false,
+      severity: rule.severity,
+      query: rule.query,
+      description: rule.description,
+      attack: { tactic: rule.tactic, technique: rule.technique, id: rule.attackId },
+      owner: rule.owner || "",
+      approval: { approvedBy: rule.approvedBy || "", approvedAt: rule.approvedAt || "" },
+      quality: scoreDetectionRuleQuality(rule)
+    }))
+  };
+}
+
+function exportDetectionAsCodeBundle() {
+  const bundle = buildDetectionAsCodeBundle(detectionRulesValue());
+  downloadText("signalprism-detections-as-code.json", JSON.stringify(bundle, null, 2), "application/json");
+  persistEnterpriseArtifact("DETECTION_AS_CODE_EXPORT", "Detection-as-code export", { ruleCount: bundle.rules.length, exportedAt: bundle.exportedAt });
+  showToast("Detection-as-code bundle exported.");
 }
 
 async function saveEnterpriseIntegration() {
@@ -4548,6 +4981,64 @@ function exportInvestigationGraph() {
   showToast("Investigation graph exported.");
 }
 
+function buildReplayTimeline(records = [], detections = []) {
+  const events = records
+    .filter((record) => Number.isFinite(record.start))
+    .sort((a, b) => a.start - b.start)
+    .slice(0, 500)
+    .map((record, index) => ({
+      id: `flow-${index + 1}`,
+      time: record.start,
+      type: "flow",
+      severity: record.action === "REJECT" && isPublicIp(record.source) && SENSITIVE_PORTS.has(record.dstPort) ? "medium" : "low",
+      title: `${record.action} ${classifyApplication(record)}`,
+      detail: `${formatEndpoint(record.source, record.srcPort)} -> ${formatEndpoint(record.destination, record.dstPort)} ${formatBytes(record.bytes)}`,
+      entity: record.destination || record.source
+    }));
+  detections.forEach((detection, index) => {
+    events.push({
+      id: `detection-${detection.id || index}`,
+      time: records[index]?.start || Date.now(),
+      type: "detection",
+      severity: detection.severity || "medium",
+      title: detection.title,
+      detail: detection.copy || detection.entity || "",
+      entity: detection.entity || ""
+    });
+  });
+  return events.sort((a, b) => a.time - b.time);
+}
+
+function renderReplayTimeline() {
+  const timeline = buildReplayTimeline(state.records, state.analysis?.detections || []);
+  if (!timeline.length) {
+    els.replayTimelineList.innerHTML = `<div class="empty-state"><strong>No replay timeline</strong><span>Load evidence to reconstruct flows, detections, and investigation milestones.</span></div>`;
+    return;
+  }
+  const high = timeline.filter((event) => event.severity === "high").length;
+  const detectionEvents = timeline.filter((event) => event.type === "detection").length;
+  els.replayTimelineList.innerHTML = [
+    enterpriseIssue("Timeline events", `${formatNumber(timeline.length)} replay events across ${formatRange(timeline[0].time, timeline.at(-1).time)}`, "ok"),
+    enterpriseIssue("Detection overlays", `${formatNumber(detectionEvents)} detection milestones`, detectionEvents ? "ok" : "warn"),
+    enterpriseIssue("Critical moments", high ? `${formatNumber(high)} high-severity moments` : "No high-severity moments in timeline", high ? "warn" : "ok"),
+    ...timeline.slice(-3).reverse().map((event) => enterpriseIssue(event.title, `${formatDate(event.time)} - ${event.detail}`, event.severity === "high" ? "warn" : "ok"))
+  ].join("");
+}
+
+function exportReplayTimeline() {
+  if (!state.records.length) return setInputMessage("Analyze evidence before exporting a replay timeline.");
+  const timeline = buildReplayTimeline(state.records, state.analysis?.detections || []);
+  const payload = {
+    product: "SignalPrism NDR",
+    exportedAt: new Date().toISOString(),
+    source: state.fileName || "current evidence",
+    timeline
+  };
+  downloadText("signalprism-investigation-replay.json", JSON.stringify(payload, null, 2), "application/json");
+  persistEnterpriseArtifact("REPLAY_TIMELINE_EXPORT", "Investigation replay export", { eventCount: timeline.length, exportedAt: payload.exportedAt });
+  showToast("Investigation replay timeline exported.");
+}
+
 function analyzePolicyInput() {
   const pasted = parsePolicyRows(els.policyInput.value);
   const findings = buildPolicyFindings(pasted);
@@ -4616,6 +5107,79 @@ function renderIncidentOps(cases = []) {
   }).join("");
 }
 
+function renderPlaybooks(cases = []) {
+  els.playbookCaseSelect.innerHTML = cases.length
+    ? cases.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)} (${escapeHtml(item.status)})</option>`).join("")
+    : `<option value="">No cases available</option>`;
+  const runs = loadJson(STORAGE_KEYS.playbookRuns, []);
+  els.playbookRunList.innerHTML = runs.length
+    ? runs.slice(0, 5).map((run) => {
+        const completed = (run.steps || []).filter((step) => step.status === "complete").length;
+        return enterpriseIssue(run.title, `${completed}/${(run.steps || []).length} steps complete - ${run.status}`, run.status === "blocked" ? "warn" : "ok");
+      }).join("")
+    : `<div class="empty-state"><strong>No playbook runs</strong><span>Select a case and create a guided response run.</span></div>`;
+}
+
+async function createPlaybookRun() {
+  const cases = await listCaseRecords().catch(() => []);
+  const caseRecord = cases.find((item) => item.id === els.playbookCaseSelect.value) || cases[0] || null;
+  if (!caseRecord) return setInputMessage("Create or sync a case before starting a response playbook.");
+  const template = els.playbookTemplateSelect.value;
+  const run = {
+    id: `playbook-${Date.now()}`,
+    template,
+    caseId: caseRecord.id,
+    title: `${playbookTemplateLabel(template)} - ${caseRecord.title}`,
+    status: "active",
+    steps: buildPlaybookSteps(template, caseRecord),
+    createdAt: new Date().toISOString()
+  };
+  await persistEnterpriseArtifact("PLAYBOOK_RUN", run.title, run);
+  saveJson(STORAGE_KEYS.playbookRuns, [run, ...loadJson(STORAGE_KEYS.playbookRuns, [])].slice(0, 20));
+  renderPlaybooks(cases);
+  showToast("Response playbook run created.");
+}
+
+function playbookTemplateLabel(template) {
+  return {
+    "contain-public-admin": "Public admin containment",
+    "investigate-lateral-movement": "Lateral movement investigation",
+    "validate-egress": "Egress validation",
+    "executive-brief": "Executive briefing"
+  }[template] || "Response playbook";
+}
+
+function buildPlaybookSteps(template, caseRecord = {}) {
+  const common = [
+    { title: "Confirm evidence scope", owner: caseRecord.assignee || "Analyst", status: "open" },
+    { title: "Attach cited evidence package", owner: "Analyst", status: "open" },
+    { title: "Record containment decision", owner: "Incident commander", status: "open" }
+  ];
+  const templates = {
+    "contain-public-admin": [
+      { title: "Validate public source and target owner", owner: caseRecord.assignee || "Analyst", status: "open" },
+      { title: "Request security group or NACL restriction", owner: "Cloud security", status: "open" },
+      { title: "Re-run evidence query after change", owner: "Detection engineer", status: "open" }
+    ],
+    "investigate-lateral-movement": [
+      { title: "Map source, target, and service ownership", owner: "SOC analyst", status: "open" },
+      { title: "Check recent identity and workload changes", owner: "Cloud platform", status: "open" },
+      { title: "Hunt for repeated accepted sensitive paths", owner: "Detection engineer", status: "open" }
+    ],
+    "validate-egress": [
+      { title: "Confirm destination reputation and ASN", owner: "Threat intel", status: "open" },
+      { title: "Validate expected transfer volume with owner", owner: "Application owner", status: "open" },
+      { title: "Add temporary egress monitor", owner: "SOC analyst", status: "open" }
+    ],
+    "executive-brief": [
+      { title: "Summarize impact and business owner", owner: "Incident commander", status: "open" },
+      { title: "Capture current risk and containment status", owner: "SOC lead", status: "open" },
+      { title: "Prepare customer/compliance talking points", owner: "Security leadership", status: "open" }
+    ]
+  };
+  return [...(templates[template] || []), ...common].map((step, index) => ({ id: `step-${index + 1}`, ...step }));
+}
+
 function renderQualityDashboard(cases = []) {
   const rules = detectionRulesValue();
   const closed = cases.filter((item) => item.status === "Closed").length;
@@ -4636,6 +5200,143 @@ function renderGovernanceReadiness(readiness, settings) {
     enterpriseIssue("Export approval", settings.governance?.exportApprovalRequired ? "Required for controlled evidence sharing" : "Disabled", settings.governance?.exportApprovalRequired ? "ok" : "warn"),
     enterpriseIssue("Analytics platform", `${settings.dataPlatform?.analyticsStore || "Not selected"} via ${settings.dataPlatform?.queryEngine || "query engine not set"}`, settings.dataPlatform?.analyticsStore ? "ok" : "warn"),
     ...(readiness.blockers.length ? readiness.blockers.map((blocker) => enterpriseIssue("Readiness gap", blocker, "warn")) : [enterpriseIssue("Readiness gaps", "No major enterprise readiness blockers detected.", "ok")])
+  ].join("");
+}
+
+async function createEvidenceVaultBundle() {
+  if (!state.records.length && !state.analysis?.detections?.length) return setInputMessage("Analyze evidence before creating a vault bundle.");
+  const cases = await listCaseRecords().catch(() => []);
+  const settings = enterpriseSettingsValue();
+  const manifest = buildEvidenceVaultManifest({
+    records: state.records,
+    analysis: state.analysis,
+    cases,
+    settings,
+    source: state.fileName || "current evidence"
+  });
+  await persistEnterpriseArtifact("EVIDENCE_VAULT_BUNDLE", manifest.title, manifest);
+  saveJson(STORAGE_KEYS.evidenceVault, [manifest, ...loadJson(STORAGE_KEYS.evidenceVault, [])].slice(0, 25));
+  renderEvidenceVault();
+  showToast("Evidence vault bundle created.");
+}
+
+function buildEvidenceVaultManifest({ records = [], analysis = null, cases = [], settings = enterpriseSettingsValue(), source = "" } = {}) {
+  const createdAt = new Date().toISOString();
+  const retentionDays = Number(settings.governance?.evidenceRetentionDays || 90);
+  const retentionUntil = new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const evidenceHash = hashText(JSON.stringify(records.slice(0, 250)) + JSON.stringify(analysis?.detections || []));
+  return {
+    id: `vault-${Date.now()}`,
+    title: `Vault bundle ${new Date().toISOString().slice(0, 10)}`,
+    source,
+    createdAt,
+    retentionUntil,
+    retentionDays,
+    legalHold: Boolean(settings.governance?.legalHold),
+    chainOfCustody: [
+      { action: "bundle.created", actor: state.backend.principal?.email || "local analyst", at: createdAt },
+      { action: "hash.calculated", actor: "SignalPrism NDR", at: createdAt, hash: evidenceHash }
+    ],
+    counts: {
+      records: records.length,
+      detections: analysis?.detections?.length || 0,
+      highDetections: (analysis?.detections || []).filter((item) => item.severity === "high").length,
+      cases: cases.length
+    },
+    evidenceHash,
+    storage: settings.dataPlatform?.archiveStore || "local evidence vault"
+  };
+}
+
+function renderEvidenceVault() {
+  const bundles = loadJson(STORAGE_KEYS.evidenceVault, []);
+  if (!bundles.length) {
+    els.evidenceVaultList.innerHTML = `<div class="empty-state"><strong>No evidence vault bundles</strong><span>Create a retained bundle after analyzing evidence or building a case.</span></div>`;
+    return;
+  }
+  els.evidenceVaultList.innerHTML = bundles.slice(0, 5).map((bundle) => enterpriseIssue(bundle.title, `${formatNumber(bundle.counts?.records || 0)} records - retain until ${bundle.retentionUntil?.slice(0, 10) || "not set"} - ${bundle.legalHold ? "legal hold" : "standard hold"}`, bundle.legalHold ? "warn" : "ok")).join("");
+}
+
+async function generateEnterpriseReport() {
+  const cases = await listCaseRecords().catch(() => []);
+  const report = buildEnterpriseReport({
+    mode: els.reportModeSelect.value,
+    analysis: state.analysis,
+    records: state.records,
+    cases,
+    settings: enterpriseSettingsValue(),
+    riskScores: buildEntityRiskScores(state.records, state.analysis, loadJson(STORAGE_KEYS.assetContext, {}), loadJson(STORAGE_KEYS.threatIntel, {})),
+    sourceHealth: buildSourceHealth(loadJson(STORAGE_KEYS.sources, []), loadJson(STORAGE_KEYS.jobRuns, []), state.records, state.errors)
+  });
+  await persistEnterpriseArtifact("ENTERPRISE_REPORT", report.title, report);
+  saveJson(STORAGE_KEYS.enterpriseReports, [report, ...loadJson(STORAGE_KEYS.enterpriseReports, [])].slice(0, 12));
+  renderEnterpriseReport();
+  showToast("Enterprise report generated.");
+}
+
+function buildEnterpriseReport({ mode = "analyst", analysis = null, records = [], cases = [], settings = enterpriseSettingsValue(), riskScores = [], sourceHealth = [] } = {}) {
+  const detections = analysis?.detections || [];
+  const high = detections.filter((item) => item.severity === "high").length;
+  const openCases = cases.filter((item) => item.status !== "Closed").length;
+  const sections = {
+    analyst: [
+      `${formatNumber(detections.length)} detections across ${formatNumber(records.length)} records.`,
+      `Top entity: ${riskScores[0]?.entity || analysis?.entityRisk?.[0]?.entity || "not available"}.`,
+      `${sourceHealth.filter((item) => item.tone === "warn").length} source-health issues need review.`
+    ],
+    executive: [
+      `${high ? "Elevated" : "Moderate"} network risk based on ${formatNumber(high)} high-severity detections.`,
+      `${formatNumber(openCases)} open incident case${openCases === 1 ? "" : "s"} require ownership.`,
+      `Security Lake pipeline is ${settings.securityLake?.bucket ? "configured" : "not yet configured"}.`
+    ],
+    compliance: [
+      `Evidence retention is ${formatNumber(settings.governance?.evidenceRetentionDays || 90)} days.`,
+      `Export approval is ${settings.governance?.exportApprovalRequired ? "enabled" : "disabled"}.`,
+      `${loadJson(STORAGE_KEYS.evidenceVault, []).length} evidence vault bundle${loadJson(STORAGE_KEYS.evidenceVault, []).length === 1 ? "" : "s"} are tracked locally.`
+    ],
+    manager: [
+      `${formatNumber(cases.length)} total cases, ${formatNumber(openCases)} open.`,
+      `${formatNumber(detectionRulesValue().filter((rule) => rule.status === "production").length)} production detections.`,
+      `${formatNumber(loadJson(STORAGE_KEYS.playbookRuns, []).length)} active or historical response playbooks.`
+    ]
+  };
+  return {
+    id: `report-${Date.now()}`,
+    title: `${mode[0].toUpperCase()}${mode.slice(1)} enterprise report`,
+    mode,
+    createdAt: new Date().toISOString(),
+    summary: sections[mode] || sections.analyst,
+    metrics: {
+      records: records.length,
+      detections: detections.length,
+      highDetections: high,
+      openCases,
+      readiness: buildEnterpriseReadiness(cases).score
+    }
+  };
+}
+
+function renderEnterpriseReport() {
+  const reports = loadJson(STORAGE_KEYS.enterpriseReports, []);
+  if (!reports.length) {
+    els.enterpriseReportPanel.innerHTML = `<div class="empty-state"><strong>No report generated</strong><span>Select a mode and generate a stakeholder-ready summary.</span></div>`;
+    return;
+  }
+  const report = reports[0];
+  els.enterpriseReportPanel.innerHTML = `<h3>${escapeHtml(report.title)}</h3>
+    <p>${escapeHtml(report.createdAt ? new Date(report.createdAt).toLocaleString() : "")}</p>
+    <ul>${(report.summary || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderEnterpriseAdminReadiness() {
+  const users = loadJson(STORAGE_KEYS.tenantUsers, []);
+  const settings = enterpriseSettingsValue();
+  const adminCount = users.filter((user) => user.role === "admin" && user.status !== "disabled").length;
+  els.enterpriseAdminList.innerHTML = [
+    enterpriseIssue("RBAC users", users.length ? `${formatNumber(users.length)} tenant users, ${formatNumber(adminCount)} admins` : "No tenant users configured locally", users.length ? "ok" : "warn"),
+    enterpriseIssue("SSO status", state.backend.authMode === "oidc" ? "OIDC configured on backend" : "Local/API-key mode active", state.backend.authMode === "oidc" ? "ok" : "warn"),
+    enterpriseIssue("SCIM provisioning", settings.governance?.scimEnabled ? "Enabled in governance settings" : "Not enabled yet", settings.governance?.scimEnabled ? "ok" : "warn"),
+    enterpriseIssue("AI permissions", hasRole("admin") || hasRole("analyst") ? "Current role can run AI actions" : "Viewer role cannot run AI actions", hasRole("viewer") && !hasRole("analyst") && !hasRole("admin") ? "warn" : "ok")
   ].join("");
 }
 
@@ -5150,6 +5851,16 @@ if (typeof module !== "undefined") {
     buildOcsfNetworkActivity,
     buildOcsfFindings,
     buildPolicyFindings,
+    buildCitedInvestigationAnswer,
+    buildDetectionAsCodeBundle,
+    buildEntityRiskScores,
+    buildEvidenceVaultManifest,
+    buildEnterpriseReport,
+    buildPlaybookSteps,
+    buildReplayTimeline,
+    buildSourceHealth,
+    parseThreatIntel,
+    scoreDetectionRuleQuality,
     SAMPLE_LOG
   };
 }

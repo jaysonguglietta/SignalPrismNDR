@@ -45,10 +45,10 @@ Responsibilities:
 - API key and OIDC JWT authorization.
 - S3 and CloudWatch ingest with AWS SigV4.
 - Scheduled job management.
-- Tenant-scoped local JSON or DynamoDB persistence for workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
+- Tenant-scoped local JSON or DynamoDB persistence for workspaces, cases, evidence runs, managed sources, jobs, runs, enterprise artifacts, and audit records.
 - Full raw evidence package persistence to local object-package files or S3 Object Lock storage.
 - Tenant admin roster and source ownership management.
-- Enterprise settings and detection-rule catalog persistence.
+- Enterprise settings, detection-rule catalog, and advanced artifact persistence for copilot notes, threat-intel imports, playbook runs, evidence vault bundles, and reports.
 - Security Lake/OCSF export manifest auditing.
 - Background S3/CloudWatch job runs with polling status.
 - Append-only audit records and export.

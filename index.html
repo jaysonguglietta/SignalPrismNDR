@@ -717,12 +717,66 @@
               <article class="panel wide">
                 <div class="panel-header">
                   <div>
+                    <p class="panel-kicker">Investigator copilot</p>
+                    <h2>Evidence-cited answers</h2>
+                  </div>
+                  <button class="ghost-button compact" id="generateCitedCopilotButton" type="button">Generate</button>
+                </div>
+                <div class="tool-body ai-assistant">
+                  <div>
+                    <label class="field-label" for="copilotQuestionInput">Question</label>
+                    <textarea id="copilotQuestionInput" class="short-textarea" spellcheck="true" placeholder="Explain why the top entity is suspicious and cite the exact flows."></textarea>
+                    <div class="hint-row">Uses loaded evidence, detections, cases, asset context, and threat intelligence. Bedrock can still be used from Reports when enabled.</div>
+                  </div>
+                  <div class="ai-answer" id="copilotCitationList" aria-live="polite"></div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Source health</p>
+                    <h2>Ingest freshness and drift</h2>
+                  </div>
+                </div>
+                <div class="quality-list" id="sourceHealthList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
                     <p class="panel-kicker">Coverage center</p>
                     <h2>Source discovery and ownership</h2>
                   </div>
                   <button class="ghost-button compact" id="discoverSourcesButton" type="button">Discover From Evidence</button>
                 </div>
                 <div class="quality-list" id="enterpriseCoverageList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Threat intelligence</p>
+                    <h2>Reputation and indicator enrichment</h2>
+                  </div>
+                  <button class="ghost-button compact" id="applyThreatIntelButton" type="button">Apply Intel</button>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="threatIntelInput">Paste JSONL or CSV indicators</label>
+                  <textarea id="threatIntelInput" class="short-textarea" spellcheck="false" placeholder='{"indicator":"203.0.113.82","type":"ip","severity":"high","source":"Commercial TI","label":"possible C2","confidence":82}'></textarea>
+                  <div class="hint-row">Accepted keys: indicator, ip, domain, severity, label, source, confidence, firstSeen, lastSeen.</div>
+                </div>
+                <div class="quality-list" id="threatIntelList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Entity risk</p>
+                    <h2>Risk scoring explanation</h2>
+                  </div>
+                </div>
+                <div class="entity-list" id="entityRiskScoringList"></div>
               </article>
 
               <article class="panel wide">
@@ -773,6 +827,17 @@
                   <span class="severity-count" id="detectionRuleCountLabel">0</span>
                 </div>
                 <div class="entity-list" id="detectionRuleList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Detection-as-code</p>
+                    <h2>Quality, approvals, rollback</h2>
+                  </div>
+                  <button class="ghost-button compact" id="exportDetectionAsCodeButton" type="button">Export</button>
+                </div>
+                <div class="quality-list" id="detectionAsCodeList"></div>
               </article>
 
               <article class="panel wide">
@@ -836,6 +901,17 @@
                 <div class="quality-list" id="investigationGraphList"></div>
               </article>
 
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Timeline replay</p>
+                    <h2>Incident reconstruction</h2>
+                  </div>
+                  <button class="ghost-button compact" id="exportReplayTimelineButton" type="button">Export</button>
+                </div>
+                <div class="quality-list" id="replayTimelineList"></div>
+              </article>
+
               <article class="panel wide">
                 <div class="panel-header">
                   <div>
@@ -859,6 +935,32 @@
                   </div>
                 </div>
                 <div class="quality-list" id="incidentOpsList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Response playbooks</p>
+                    <h2>Guided containment and validation</h2>
+                  </div>
+                  <button class="ghost-button compact" id="createPlaybookRunButton" type="button">Create Run</button>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <label class="field-label" for="playbookCaseSelect">Case</label>
+                    <select id="playbookCaseSelect"></select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="playbookTemplateSelect">Playbook</label>
+                    <select id="playbookTemplateSelect">
+                      <option value="contain-public-admin">Public admin exposure containment</option>
+                      <option value="investigate-lateral-movement">Lateral movement investigation</option>
+                      <option value="validate-egress">High-volume egress validation</option>
+                      <option value="executive-brief">Executive incident briefing</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="quality-list" id="playbookRunList"></div>
               </article>
 
               <article class="panel">
@@ -900,6 +1002,47 @@
                   </div>
                 </div>
                 <div class="quality-list" id="governanceReadinessList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Evidence vault</p>
+                    <h2>Retention and chain of custody</h2>
+                  </div>
+                  <button class="ghost-button compact" id="createEvidenceVaultButton" type="button">Create Bundle</button>
+                </div>
+                <div class="quality-list" id="evidenceVaultList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Enterprise reporting</p>
+                    <h2>Analyst, executive, and compliance views</h2>
+                  </div>
+                  <button class="ghost-button compact" id="generateEnterpriseReportButton" type="button">Generate Report</button>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="reportModeSelect">Report mode</label>
+                  <select id="reportModeSelect">
+                    <option value="analyst">Analyst detail</option>
+                    <option value="executive">Executive risk</option>
+                    <option value="compliance">Compliance evidence</option>
+                    <option value="manager">Operations manager</option>
+                  </select>
+                </div>
+                <div class="report-block" id="enterpriseReportPanel"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Tenant administration</p>
+                    <h2>SSO, SCIM, RBAC readiness</h2>
+                  </div>
+                </div>
+                <div class="quality-list" id="enterpriseAdminList"></div>
               </article>
             </div>
           </section>

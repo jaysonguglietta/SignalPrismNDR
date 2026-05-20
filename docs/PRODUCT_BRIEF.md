@@ -116,7 +116,7 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - AWS is the first-class cloud provider.
 - Browser-side analysis is acceptable for the first production-shaped version.
 - Shared deployments run privately behind HTTPS with API key or OIDC.
-- DynamoDB is the preferred cloud persistence option for tenant workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
+- DynamoDB is the preferred cloud persistence option for tenant workspaces, cases, evidence runs, managed sources, jobs, runs, enterprise artifacts, and audit records.
 - S3 Object Lock is the preferred production storage path for full raw evidence packages.
 - Bedrock is opt-in and disabled by default.
 
@@ -131,7 +131,7 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Tenant-backed workspace, evidence, source, and case persistence with IndexedDB/local fallback.
 - Tenant admin screen for users, roles, and source ownership.
 - Full raw evidence package storage with local fallback and S3 Object Lock retention.
-- Enterprise command center for source discovery, detection engineering, Security Lake exports, asset context, policy exposure, governance, and quality metrics.
+- Enterprise command center for cited investigation answers, source discovery, threat intelligence, entity risk scoring, detection-as-code, Security Lake exports, asset context, replay, playbooks, evidence vault bundles, stakeholder reporting, policy exposure, governance, and quality metrics.
 - Case management and case audit history.
 - Detection explainability and tunable rule profiles.
 - Managed AWS source inventory with direct ingest and schedule creation.

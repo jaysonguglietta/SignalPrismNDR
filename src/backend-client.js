@@ -86,6 +86,18 @@ export async function saveEnterpriseSettings(settings) {
   return apiPost("/api/enterprise/settings", settings);
 }
 
+export async function listEnterpriseArtifacts(type = "") {
+  return apiGet(`/api/enterprise/artifacts${type ? `?type=${encodeURIComponent(type)}` : ""}`);
+}
+
+export async function saveEnterpriseArtifact(artifact) {
+  return apiPost("/api/enterprise/artifacts", artifact);
+}
+
+export async function deleteEnterpriseArtifact(id) {
+  return apiDelete(`/api/enterprise/artifacts/${encodeURIComponent(id)}`);
+}
+
 export async function listDetectionRules() {
   return apiGet("/api/detection-rules");
 }

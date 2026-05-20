@@ -50,7 +50,7 @@ Starts temporary backend instances and verifies API auth, tenant-scoped RBAC, te
 npm run ui:test
 ```
 
-Runs no-dependency UI workflow checks for upload/demo analysis, rule tuning, AI context shaping, investigation package export, and topology replay helpers.
+Runs no-dependency UI workflow checks for upload/demo analysis, rule tuning, AI context shaping, investigation package export, topology replay helpers, and advanced enterprise helper models.
 
 ```bash
 npm run visual:test
@@ -139,7 +139,7 @@ Integration tests validate:
 - Tenant admin users and source ownership.
 - Raw evidence package metadata and local package persistence.
 - Async job run list access.
-- Enterprise settings, detection-rule APIs, Security Lake export manifests, and policy exposure helpers.
+- Enterprise settings, detection-rule APIs, enterprise artifact APIs, Security Lake export manifests, and policy exposure helpers.
 - Viewer write/export/AI restrictions.
 - Disabled Bedrock endpoint behavior.
 - Rate limiting.
@@ -154,6 +154,7 @@ UI flow tests validate:
 - Topology replay timeline state.
 - OCSF network/finding export helpers.
 - Policy exposure analysis.
+- Threat-intel parsing, cited copilot answers, detection-as-code bundles, entity risk scoring, playbook steps, vault manifests, source-health checks, and enterprise report models.
 
 Visual regression specs cover:
 

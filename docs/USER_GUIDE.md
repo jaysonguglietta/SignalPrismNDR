@@ -202,6 +202,22 @@ Admins can delete jobs. Admins and analysts can run jobs manually.
 
 Use `Async` on a scheduled job to queue a background CloudWatch or S3 import. The job status list shows queued, running, completed, and failed runs. SignalPrism polls the backend and shows a toast when an async import completes or fails.
 
+## Enterprise Command Center
+
+Open `Enterprise` for advanced NDR operations:
+
+- `Investigator copilot`: generates deterministic natural-language answers with citations to detections, flows, cases, assets, and threat-intel matches.
+- `Source health`: checks managed source ownership, observed scope, async import status, and parser drift.
+- `Threat intelligence`: imports JSONL or CSV indicators and enriches current evidence.
+- `Entity risk`: calculates explainable risk scores from detections, sensitive flows, asset criticality, and threat intelligence.
+- `Detection engineering`: creates, tests, clones, promotes, and exports detection-as-code rules.
+- `Security Lake and SIEM`: creates OCSF NDJSON exports and records backend manifests.
+- `Investigation graph` and `Timeline replay`: export entity graphs and incident reconstruction timelines.
+- `Response playbooks`: creates case-linked containment, lateral movement, egress, and executive briefing runs.
+- `Evidence vault`: creates retention and chain-of-custody manifests for investigation packages.
+- `Enterprise reporting`: generates analyst, executive, compliance, and operations-manager reports.
+- `Tenant administration`: summarizes SSO, SCIM, RBAC, and AI permission readiness.
+
 ## Cases
 
 Open `Cases` to create or update investigation records.

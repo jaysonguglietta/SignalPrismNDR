@@ -22,8 +22,8 @@ Protected endpoints require one of:
 ## Roles
 
 - `admin`: all protected endpoints, including tenant roster, source ownership, destructive deletes, and audit export.
-- `analyst`: save tenant workspaces, cases, evidence runs, sources, ingest, create jobs, run jobs, export investigations, and use the AI assistant.
-- `viewer`: read tenant workspaces, cases, evidence runs, sources, jobs, and runs.
+- `analyst`: save tenant workspaces, cases, evidence runs, sources, enterprise artifacts, ingest, create jobs, run jobs, export investigations, and use the AI assistant.
+- `viewer`: read tenant workspaces, cases, evidence runs, sources, jobs, runs, enterprise settings, detection rules, and enterprise artifacts.
 
 Tenant isolation uses `principal.tenantId`. OIDC tenants come from `NDR_TENANT_CLAIM` with fallback claims. API key and local-dev sessions use `NDR_DEFAULT_TENANT`.
 
@@ -280,6 +280,32 @@ Request:
   }
 }
 ```
+
+### `GET /api/enterprise/artifacts`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns tenant enterprise artifacts. Use the optional `type` query parameter to filter artifacts such as `COPILOT_NOTE`, `THREAT_INTEL`, `PLAYBOOK_RUN`, `EVIDENCE_VAULT_BUNDLE`, or `ENTERPRISE_REPORT`.
+
+### `POST /api/enterprise/artifacts`
+
+Protected. Requires `admin` or `analyst`. Saves a tenant-scoped enterprise artifact and writes an audit event. This endpoint supports advanced workflows without creating a separate route per artifact type.
+
+Request:
+
+```json
+{
+  "type": "PLAYBOOK_RUN",
+  "title": "Public admin containment - Case 42",
+  "status": "active",
+  "payload": {
+    "caseId": "case-42",
+    "steps": []
+  }
+}
+```
+
+### `DELETE /api/enterprise/artifacts/{id}`
+
+Protected. Requires `admin`. Deletes an enterprise artifact and writes an audit event.
 
 ### `GET /api/detection-rules`
 

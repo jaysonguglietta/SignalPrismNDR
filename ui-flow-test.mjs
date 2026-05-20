@@ -7,12 +7,22 @@ const {
   SAMPLE_LOG,
   analyzeRecords,
   buildAiEvidenceContextModel,
+  buildCitedInvestigationAnswer,
+  buildDetectionAsCodeBundle,
+  buildEntityRiskScores,
+  buildEvidenceVaultManifest,
+  buildEnterpriseReport,
   buildInvestigationPackageModel,
   buildOcsfFindings,
   buildOcsfNetworkActivity,
   buildPolicyFindings,
+  buildPlaybookSteps,
+  buildReplayTimeline,
+  buildSourceHealth,
   buildTopologyReplaySnapshot,
   parseVpcFlowLog,
+  parseThreatIntel,
+  scoreDetectionRuleQuality,
   tuneAnalysisForProfile
 } = require("./app.js");
 
@@ -30,11 +40,18 @@ assertIncludes(html, 'id="saveTenantUserButton"', "tenant user save control shou
 assertIncludes(html, 'id="assignSourceOwnerButton"', "source ownership assignment should exist");
 assertIncludes(html, 'id="backendJobRunsList"', "async job run status list should exist");
 assertIncludes(html, 'id="enterpriseTab"', "enterprise command center tab should exist");
+assertIncludes(html, 'id="generateCitedCopilotButton"', "cited copilot workflow should exist");
 assertIncludes(html, 'id="discoverSourcesButton"', "source discovery workflow should exist");
+assertIncludes(html, 'id="applyThreatIntelButton"', "threat intelligence enrichment should exist");
 assertIncludes(html, 'id="saveDetectionRuleButton"', "detection rule lifecycle should exist");
+assertIncludes(html, 'id="exportDetectionAsCodeButton"', "detection-as-code export should exist");
 assertIncludes(html, 'id="exportSecurityLakeButton"', "Security Lake export should exist");
 assertIncludes(html, 'id="applyAssetContextButton"', "asset context workflow should exist");
+assertIncludes(html, 'id="exportReplayTimelineButton"', "investigation replay export should exist");
 assertIncludes(html, 'id="analyzePolicyButton"', "policy exposure workflow should exist");
+assertIncludes(html, 'id="createPlaybookRunButton"', "response playbook workflow should exist");
+assertIncludes(html, 'id="createEvidenceVaultButton"', "evidence vault workflow should exist");
+assertIncludes(html, 'id="generateEnterpriseReportButton"', "enterprise reporting workflow should exist");
 
 const parsed = parseVpcFlowLog(SAMPLE_LOG);
 const analysis = analyzeRecords(parsed.records, parsed.errors);
@@ -87,6 +104,36 @@ assert.equal(ocsfFindings[0].class_name, "Security Finding", "Security Lake expo
 
 const policyFindings = buildPolicyFindings([{ source: "0.0.0.0/0", port: 22, action: "allow", resource: "sg-admin" }]);
 assert.ok(policyFindings.some((finding) => finding.severity === "high"), "policy analysis should flag public sensitive services");
+
+const intel = parseThreatIntel('indicator,severity,label,source,confidence\n203.0.113.82,high,possible C2,UnitTest,91');
+assert.equal(intel["203.0.113.82"].severity, "high", "threat intel parser should normalize CSV indicators");
+
+const riskScores = buildEntityRiskScores(parsed.records, analysis, { "10.0.1.15": { key: "10.0.1.15", criticality: "high" } }, intel);
+assert.ok(riskScores.some((item) => item.score > 0), "entity risk scoring should produce prioritized entities");
+
+const cited = buildCitedInvestigationAnswer({ question: "Why suspicious?", analysis, records: parsed.records, cases: [], assets: {}, threatIntel: intel });
+assert.ok(cited.citations.length > 0, "cited copilot should provide evidence references");
+
+const quality = scoreDetectionRuleQuality({ name: "Rule", query: "action:ACCEPT", description: "Detects accepted traffic for a meaningful test fixture.", attackId: "T1021", owner: "Security", testCount: 3, status: "production" });
+assert.ok(quality.score >= 70, "detection quality scoring should reward production-ready rules");
+
+const detectionBundle = buildDetectionAsCodeBundle([{ id: "rule-1", name: "Rule", query: "action:ACCEPT", severity: "medium", status: "production" }]);
+assert.equal(detectionBundle.schema, "signalprism.detections.v1", "detection-as-code export should include schema identity");
+
+const replayTimeline = buildReplayTimeline(parsed.records, analysis.detections);
+assert.ok(replayTimeline.some((event) => event.type === "detection"), "timeline replay should overlay detections");
+
+const playbookSteps = buildPlaybookSteps("contain-public-admin", { title: "Case", assignee: "Analyst" });
+assert.ok(playbookSteps.length >= 3, "playbooks should create actionable response steps");
+
+const vaultManifest = buildEvidenceVaultManifest({ records: parsed.records, analysis, cases: [], settings: { governance: { evidenceRetentionDays: 30 } }, source: "unit" });
+assert.ok(vaultManifest.evidenceHash, "vault manifest should include chain-of-custody hash");
+
+const sourceHealth = buildSourceHealth([{ id: "source-1", name: "Prod", scope: ["eni-0a1b2c3d"] }], [], parsed.records, []);
+assert.equal(sourceHealth[0].title, "Prod", "source health should evaluate managed sources");
+
+const enterpriseReport = buildEnterpriseReport({ mode: "executive", analysis, records: parsed.records, cases: [], settings: { securityLake: { bucket: "" }, governance: {} }, riskScores, sourceHealth });
+assert.equal(enterpriseReport.mode, "executive", "enterprise report should preserve selected report mode");
 
 console.log("ui flow checks passed");
 

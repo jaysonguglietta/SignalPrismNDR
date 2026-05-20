@@ -169,6 +169,18 @@ async function testApiAuth() {
     });
     assert.equal(securityLakeResponse.status, 200);
     assert.equal((await securityLakeResponse.json()).schema, "OCSF");
+
+    const artifactResponse = await fetch(`${base}/api/enterprise/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ type: "PLAYBOOK_RUN", title: "Integration playbook", payload: { steps: 3 } })
+    });
+    assert.equal(artifactResponse.status, 201);
+    assert.equal((await artifactResponse.json()).type, "PLAYBOOK_RUN");
+
+    const artifactsList = await fetch(`${base}/api/enterprise/artifacts?type=PLAYBOOK_RUN`, { headers: { "x-ndr-api-key": "integration-key" } });
+    assert.equal(artifactsList.status, 200);
+    assert.equal((await artifactsList.json()).length, 1);
   } finally {
     await stopServer(server);
     await rm(dataDir, { recursive: true, force: true });
@@ -232,6 +244,13 @@ async function testTenantScopedRbac() {
       body: JSON.stringify({ governance: { exportApprovalRequired: false } })
     });
     assert.equal(viewerSettingsSave.status, 403);
+
+    const viewerArtifactSave = await fetch(`${base}/api/enterprise/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": viewer },
+      body: JSON.stringify({ type: "COPILOT_NOTE", title: "Viewer write", payload: {} })
+    });
+    assert.equal(viewerArtifactSave.status, 403);
   } finally {
     await stopServer(server);
     await rm(dataDir, { recursive: true, force: true });

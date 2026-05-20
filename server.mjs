@@ -20,6 +20,7 @@ const SOURCES_FILE = join(DATA_DIR, "sources.json");
 const TENANT_USERS_FILE = join(DATA_DIR, "tenant-users.json");
 const DETECTION_RULES_FILE = join(DATA_DIR, "detection-rules.json");
 const ENTERPRISE_SETTINGS_FILE = join(DATA_DIR, "enterprise-settings.json");
+const ENTERPRISE_ARTIFACTS_FILE = join(DATA_DIR, "enterprise-artifacts.json");
 const AUDIT_FILE = join(DATA_DIR, "audit.ndjson");
 const EVIDENCE_PACKAGES_DIR = join(DATA_DIR, "evidence-packages");
 const MAX_BODY_BYTES = Number(process.env.NDR_MAX_BODY_BYTES || 1024 * 1024);
@@ -92,6 +93,7 @@ if (STORE_MODE === "local") {
   await ensureJsonFile(TENANT_USERS_FILE, []);
   await ensureJsonFile(DETECTION_RULES_FILE, []);
   await ensureJsonFile(ENTERPRISE_SETTINGS_FILE, []);
+  await ensureJsonFile(ENTERPRISE_ARTIFACTS_FILE, []);
   await ensureTextFile(AUDIT_FILE, "");
   await mkdir(EVIDENCE_PACKAGES_DIR, { recursive: true });
 }
@@ -223,6 +225,33 @@ async function routeApi(req, res) {
     await putTenantObject("ENTERPRISE_SETTING", settings.id, settings, req.principal.tenantId, ENTERPRISE_SETTINGS_FILE);
     await appendAudit("enterprise.settings.saved", { settingsId: settings.id, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, settings);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/enterprise/artifacts") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    const type = String(url.searchParams.get("type") || "").trim().toUpperCase();
+    const artifacts = await listTenantObjects("ENTERPRISE_ARTIFACT", req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE, 250);
+    sendJson(res, 200, type ? artifacts.filter((artifact) => artifact.type === type) : artifacts);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/enterprise/artifacts") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const artifact = normalizeEnterpriseArtifact(body, req.principal);
+    await putTenantObject("ENTERPRISE_ARTIFACT", artifact.id, artifact, req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE);
+    await appendAudit("enterprise.artifact.saved", { artifactId: artifact.id, type: artifact.type, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, body.id ? 200 : 201, artifact);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/enterprise/artifacts/")) {
+    if (!requireRole(req, res, ["admin"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    await deleteTenantObject("ENTERPRISE_ARTIFACT", id, req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE);
+    await appendAudit("enterprise.artifact.deleted", { artifactId: id, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ok: true });
     return;
   }
 
@@ -1296,6 +1325,9 @@ function normalizeDetectionRule(body = {}, principal = {}) {
     enabled: body.enabled !== false,
     status: ["draft", "test", "production", "retired"].includes(body.status) ? body.status : "draft",
     owner: String(body.owner || principal.email || principal.name || principal.subject || "unknown"),
+    version: Math.max(1, Number(body.version || 1)),
+    approvedBy: String(body.approvedBy || ""),
+    approvedAt: String(body.approvedAt || ""),
     testCount: Number(body.testCount || 0),
     lastTestedAt: body.lastTestedAt || "",
     createdAt: body.createdAt || now,
@@ -1321,6 +1353,25 @@ function normalizeSecurityLakeExport(body = {}, principal = {}) {
     partitionHint: `region=${String(body.region || DDB_REGION)}/account=${String(body.accountId || "unknown")}/dt=${now.slice(0, 10)}/`,
     exportedBy: principal.email || principal.name || principal.subject || "unknown",
     exportedAt: now
+  };
+}
+
+function normalizeEnterpriseArtifact(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const type = String(body.type || "").trim().toUpperCase().replace(/[^A-Z0-9_:-]/g, "_").slice(0, 80);
+  if (!type) throw new Error("Artifact type is required");
+  const title = String(body.title || type.toLowerCase().replace(/[_:-]+/g, " ")).trim().slice(0, 180);
+  const allowedPayload = body.payload && typeof body.payload === "object" ? body.payload : {};
+  return {
+    id: String(body.id || `artifact-${Date.now()}`),
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    type,
+    title,
+    status: String(body.status || "active").trim().slice(0, 40),
+    payload: JSON.parse(JSON.stringify(allowedPayload)),
+    createdBy: body.createdBy || principal.email || principal.name || principal.subject || "unknown",
+    createdAt: body.createdAt || now,
+    updatedAt: now
   };
 }
 

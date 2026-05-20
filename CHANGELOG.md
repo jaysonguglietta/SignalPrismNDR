@@ -25,6 +25,10 @@ All notable changes to SignalPrism NDR are tracked here.
 - Optional Playwright visual regression configuration and desktop/mobile snapshot specs.
 - Enterprise command center with readiness scoring, source discovery, detection rule lifecycle, asset context, policy exposure review, quality metrics, and governance controls.
 - Tenant-scoped enterprise settings and detection-rule APIs with RBAC and audit coverage.
+- Tenant-scoped enterprise artifact API for copilot notes, threat-intel imports, playbook runs, evidence vault bundles, and generated reports.
+- Evidence-cited investigator copilot, threat-intelligence enrichment, source-health drift checks, and explainable entity risk scoring.
+- Detection-as-code export, rule quality scoring, clone/promote lifecycle actions, approval metadata, and version increments.
+- Response playbooks, evidence vault bundle manifests, replay timeline export, stakeholder report modes, and tenant admin readiness checks.
 - Security Lake/SIEM OCSF NDJSON export with backend manifest auditing.
 - Investigation graph JSON export and enriched asset ownership posture.
 
