@@ -18,6 +18,8 @@ const EVIDENCE_FILE = join(DATA_DIR, "evidence-runs.json");
 const JOB_RUNS_FILE = join(DATA_DIR, "job-runs.json");
 const SOURCES_FILE = join(DATA_DIR, "sources.json");
 const TENANT_USERS_FILE = join(DATA_DIR, "tenant-users.json");
+const DETECTION_RULES_FILE = join(DATA_DIR, "detection-rules.json");
+const ENTERPRISE_SETTINGS_FILE = join(DATA_DIR, "enterprise-settings.json");
 const AUDIT_FILE = join(DATA_DIR, "audit.ndjson");
 const EVIDENCE_PACKAGES_DIR = join(DATA_DIR, "evidence-packages");
 const MAX_BODY_BYTES = Number(process.env.NDR_MAX_BODY_BYTES || 1024 * 1024);
@@ -88,6 +90,8 @@ if (STORE_MODE === "local") {
   await ensureJsonFile(JOB_RUNS_FILE, []);
   await ensureJsonFile(SOURCES_FILE, []);
   await ensureJsonFile(TENANT_USERS_FILE, []);
+  await ensureJsonFile(DETECTION_RULES_FILE, []);
+  await ensureJsonFile(ENTERPRISE_SETTINGS_FILE, []);
   await ensureTextFile(AUDIT_FILE, "");
   await mkdir(EVIDENCE_PACKAGES_DIR, { recursive: true });
 }
@@ -202,6 +206,48 @@ async function routeApi(req, res) {
     const body = await readJson(req);
     const source = await assignSourceOwner(body.sourceId, body.ownerId, req.principal);
     sendJson(res, 200, source);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/enterprise/settings") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    const settings = await getTenantObject("ENTERPRISE_SETTING", "default", req.principal.tenantId, ENTERPRISE_SETTINGS_FILE);
+    sendJson(res, 200, settings || defaultEnterpriseSettings(req.principal));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/enterprise/settings") {
+    if (!requireRole(req, res, ["admin"])) return;
+    const body = await readJson(req);
+    const settings = normalizeEnterpriseSettings(body, req.principal);
+    await putTenantObject("ENTERPRISE_SETTING", settings.id, settings, req.principal.tenantId, ENTERPRISE_SETTINGS_FILE);
+    await appendAudit("enterprise.settings.saved", { settingsId: settings.id, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, settings);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/detection-rules") {
+    if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
+    sendJson(res, 200, await listTenantObjects("DETECTION_RULE", req.principal.tenantId, DETECTION_RULES_FILE, 200));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/detection-rules") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const rule = normalizeDetectionRule(body, req.principal);
+    await putTenantObject("DETECTION_RULE", rule.id, rule, req.principal.tenantId, DETECTION_RULES_FILE);
+    await appendAudit("detection.rule.saved", { ruleId: rule.id, name: rule.name, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, body.id ? 200 : 201, rule);
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/detection-rules/")) {
+    if (!requireRole(req, res, ["admin"])) return;
+    const id = decodeURIComponent(url.pathname.split("/").pop());
+    await deleteTenantObject("DETECTION_RULE", id, req.principal.tenantId, DETECTION_RULES_FILE);
+    await appendAudit("detection.rule.deleted", { ruleId: id, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, 200, { ok: true });
     return;
   }
 
@@ -404,6 +450,15 @@ async function routeApi(req, res) {
     };
     await appendAudit("investigation.exported", { workspace: body.workspace?.name || body.source || "current", tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, exported);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/exports/security-lake") {
+    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    const body = await readJson(req);
+    const manifest = normalizeSecurityLakeExport(body, req.principal);
+    await appendAudit("security_lake.exported", { recordCount: manifest.recordCount, findingCount: manifest.findingCount, tenantId: req.principal.tenantId, destination: manifest.destination }, req.principal);
+    sendJson(res, 200, manifest);
     return;
   }
 
@@ -1137,6 +1192,135 @@ function normalizeSource(body = {}, principal = {}) {
     ownerName: String(body.ownerName || ""),
     createdAt: body.createdAt || now,
     updatedAt: now
+  };
+}
+
+function defaultEnterpriseSettings(principal = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: "default",
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    securityLake: {
+      enabled: false,
+      bucket: "",
+      prefix: "AWSLogs/security-lake/custom/SignalPrismNDR",
+      region: DDB_REGION,
+      format: "ocsf-json"
+    },
+    siem: {
+      target: "Security Lake",
+      endpoint: "",
+      exportMode: "manual"
+    },
+    governance: {
+      evidenceRetentionDays: EVIDENCE_RETENTION_DAYS,
+      legalHold: false,
+      exportApprovalRequired: true,
+      auditRetentionDays: AUDIT_RETENTION_DAYS,
+      scimEnabled: false
+    },
+    dataPlatform: {
+      analyticsStore: STORE_MODE === "dynamodb" ? "DynamoDB + S3 evidence packages" : "Local JSON + local evidence packages",
+      searchStore: "",
+      archiveStore: EVIDENCE_BUCKET ? `s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}` : "local evidence-packages",
+      queryEngine: "Athena-ready OCSF export"
+    },
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function normalizeEnterpriseSettings(body = {}, principal = {}) {
+  const existing = body && typeof body === "object" ? body : {};
+  const defaults = defaultEnterpriseSettings(principal);
+  const now = new Date().toISOString();
+  return {
+    ...defaults,
+    ...existing,
+    id: "default",
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    securityLake: {
+      ...defaults.securityLake,
+      ...(existing.securityLake || {}),
+      bucket: String(existing.securityLake?.bucket || "").trim(),
+      prefix: String(existing.securityLake?.prefix || defaults.securityLake.prefix).trim(),
+      region: String(existing.securityLake?.region || defaults.securityLake.region).trim(),
+      format: ["ocsf-json", "ocsf-ndjson", "parquet-ready"].includes(existing.securityLake?.format) ? existing.securityLake.format : defaults.securityLake.format
+    },
+    siem: {
+      ...defaults.siem,
+      ...(existing.siem || {}),
+      target: String(existing.siem?.target || defaults.siem.target).trim(),
+      endpoint: String(existing.siem?.endpoint || "").trim(),
+      exportMode: ["manual", "scheduled", "streaming"].includes(existing.siem?.exportMode) ? existing.siem.exportMode : defaults.siem.exportMode
+    },
+    governance: {
+      ...defaults.governance,
+      ...(existing.governance || {}),
+      evidenceRetentionDays: Math.max(1, Number(existing.governance?.evidenceRetentionDays || defaults.governance.evidenceRetentionDays)),
+      auditRetentionDays: Math.max(1, Number(existing.governance?.auditRetentionDays || defaults.governance.auditRetentionDays)),
+      legalHold: Boolean(existing.governance?.legalHold),
+      exportApprovalRequired: existing.governance?.exportApprovalRequired !== false,
+      scimEnabled: Boolean(existing.governance?.scimEnabled)
+    },
+    dataPlatform: {
+      ...defaults.dataPlatform,
+      ...(existing.dataPlatform || {}),
+      analyticsStore: String(existing.dataPlatform?.analyticsStore || defaults.dataPlatform.analyticsStore).trim(),
+      searchStore: String(existing.dataPlatform?.searchStore || "").trim(),
+      archiveStore: String(existing.dataPlatform?.archiveStore || defaults.dataPlatform.archiveStore).trim(),
+      queryEngine: String(existing.dataPlatform?.queryEngine || defaults.dataPlatform.queryEngine).trim()
+    },
+    createdAt: existing.createdAt || now,
+    updatedAt: now
+  };
+}
+
+function normalizeDetectionRule(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const name = String(body.name || "").trim();
+  if (!name) throw new Error("Rule name is required");
+  const query = String(body.query || "").trim();
+  if (!query) throw new Error("Rule query is required");
+  const severity = ["high", "medium", "low"].includes(body.severity) ? body.severity : "medium";
+  return {
+    id: String(body.id || `rule-${Date.now()}`),
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    name,
+    description: String(body.description || "").trim(),
+    query,
+    severity,
+    tactic: String(body.tactic || "Discovery").trim(),
+    technique: String(body.technique || "Custom analytic").trim(),
+    attackId: String(body.attackId || "").trim(),
+    enabled: body.enabled !== false,
+    status: ["draft", "test", "production", "retired"].includes(body.status) ? body.status : "draft",
+    owner: String(body.owner || principal.email || principal.name || principal.subject || "unknown"),
+    testCount: Number(body.testCount || 0),
+    lastTestedAt: body.lastTestedAt || "",
+    createdAt: body.createdAt || now,
+    updatedAt: now
+  };
+}
+
+function normalizeSecurityLakeExport(body = {}, principal = {}) {
+  const now = new Date().toISOString();
+  const recordCount = Math.max(0, Number(body.recordCount || 0));
+  const findingCount = Math.max(0, Number(body.findingCount || 0));
+  const destination = String(body.destination || "").trim();
+  return {
+    id: `security-lake-export-${Date.now()}`,
+    tenantId: principal.tenantId || DEFAULT_TENANT,
+    product: "SignalPrism NDR",
+    schema: "OCSF",
+    eventClasses: ["Network Activity", "Security Finding"],
+    recordCount,
+    findingCount,
+    destination,
+    format: String(body.format || "ocsf-ndjson"),
+    partitionHint: `region=${String(body.region || DDB_REGION)}/account=${String(body.accountId || "unknown")}/dt=${now.slice(0, 10)}/`,
+    exportedBy: principal.email || principal.name || principal.subject || "unknown",
+    exportedAt: now
   };
 }
 

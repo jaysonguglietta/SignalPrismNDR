@@ -131,6 +131,11 @@ const STORAGE_KEYS = {
   sources: "ndrFlowConsole.sources.v1",
   tenantUsers: "ndrFlowConsole.tenantUsers.v1",
   seenJobRuns: "ndrFlowConsole.seenJobRuns.v1",
+  detectionRules: "ndrFlowConsole.detectionRules.v1",
+  enterpriseSettings: "ndrFlowConsole.enterpriseSettings.v1",
+  assetContext: "ndrFlowConsole.assetContext.v1",
+  policyFindings: "ndrFlowConsole.policyFindings.v1",
+  securityLakeManifest: "ndrFlowConsole.securityLakeManifest.v1",
   enrichment: "ndrFlowConsole.enrichment.v1"
 };
 
@@ -335,6 +340,47 @@ function cacheElements() {
     "replayTimeLabel",
     "replayEventCountLabel",
     "replayEventList",
+    "enterpriseReadinessLabel",
+    "enterpriseMetricGrid",
+    "discoverSourcesButton",
+    "enterpriseCoverageList",
+    "detectionRuleIdInput",
+    "detectionRuleNameInput",
+    "detectionRuleQueryInput",
+    "detectionRuleDescriptionInput",
+    "detectionRuleSeverityInput",
+    "detectionRuleTacticInput",
+    "detectionRuleTechniqueInput",
+    "detectionRuleAttackInput",
+    "testDetectionRuleButton",
+    "saveDetectionRuleButton",
+    "detectionRuleResultList",
+    "detectionRuleCountLabel",
+    "detectionRuleList",
+    "securityLakeBucketInput",
+    "securityLakePrefixInput",
+    "siemTargetInput",
+    "siemEndpointInput",
+    "saveIntegrationButton",
+    "exportSecurityLakeButton",
+    "securityLakeManifestList",
+    "assetContextInput",
+    "applyAssetContextButton",
+    "assetContextList",
+    "exportGraphButton",
+    "investigationGraphList",
+    "policyInput",
+    "analyzePolicyButton",
+    "policyFindingList",
+    "incidentOpsList",
+    "qualityDashboardList",
+    "retentionDaysInput",
+    "legalHoldInput",
+    "exportApprovalInput",
+    "analyticsStoreInput",
+    "queryEngineInput",
+    "saveGovernanceButton",
+    "governanceReadinessList",
     "toastRegion",
     "confirmDialog",
     "confirmTitle",
@@ -532,6 +578,23 @@ function wireEvents() {
     if (del) deleteTenantUser(del.dataset.deleteTenantUser);
   });
   els.assignSourceOwnerButton.addEventListener("click", assignSourceOwner);
+  els.discoverSourcesButton.addEventListener("click", discoverSourcesFromEvidence);
+  els.testDetectionRuleButton.addEventListener("click", testDetectionRuleForm);
+  els.saveDetectionRuleButton.addEventListener("click", saveDetectionRuleForm);
+  els.detectionRuleList.addEventListener("click", (event) => {
+    const edit = event.target.closest("[data-edit-rule]");
+    const test = event.target.closest("[data-test-rule]");
+    const del = event.target.closest("[data-delete-rule]");
+    if (edit) editDetectionRule(edit.dataset.editRule);
+    if (test) testDetectionRuleById(test.dataset.testRule);
+    if (del) deleteDetectionRuleById(del.dataset.deleteRule);
+  });
+  els.saveIntegrationButton.addEventListener("click", saveEnterpriseIntegration);
+  els.exportSecurityLakeButton.addEventListener("click", exportSecurityLakeOcsf);
+  els.applyAssetContextButton.addEventListener("click", applyAssetContextInput);
+  els.exportGraphButton.addEventListener("click", exportInvestigationGraph);
+  els.analyzePolicyButton.addEventListener("click", analyzePolicyInput);
+  els.saveGovernanceButton.addEventListener("click", saveGovernanceControls);
   els.createCaseFromTopDetectionButton.addEventListener("click", createCaseFromTopDetection);
   els.saveCaseButton.addEventListener("click", saveCaseForm);
   els.caseList.addEventListener("click", (event) => {
@@ -564,6 +627,7 @@ function activateTab(tabName) {
     panel.hidden = !isActive;
   });
   if (tabName === "admin") renderTenantAdmin();
+  if (tabName === "enterprise") renderEnterprise();
 }
 
 function clearCurrentEvidence() {
@@ -637,6 +701,7 @@ async function initializePersistentData() {
     await refreshManagedSourcesFromBackend();
     await refreshCases();
     await refreshTenantUsersFromBackend();
+    await refreshEnterpriseFromBackend();
     await refreshJobRuns(true);
     startJobRunPolling();
   } catch (error) {
@@ -2055,6 +2120,7 @@ function renderDashboard() {
   renderAnalystSummary();
   renderPolicyRecommendations();
   renderTopology();
+  renderEnterprise();
   if (!state.selectedEntity && analysis.entityRisk[0]) {
     selectEntity(analysis.entityRisk[0].key, false);
   } else {
@@ -2090,7 +2156,13 @@ function renderEmptyDashboard() {
     els.policyRecommendations,
     els.entityDetail,
     els.topologyCanvas,
-    els.replayEventList
+    els.replayEventList,
+    els.enterpriseCoverageList,
+    els.detectionRuleResultList,
+    els.investigationGraphList,
+    els.incidentOpsList,
+    els.qualityDashboardList,
+    els.governanceReadinessList
   ].forEach((el) => {
     if (el) el.innerHTML = emptyState();
   });
@@ -2115,6 +2187,7 @@ function renderEmptyDashboard() {
   renderOptimization();
   renderImportQuality();
   renderRecordsTable();
+  renderEnterprise();
 }
 
 function metricTemplate(label, value, detail) {
@@ -3869,6 +3942,703 @@ function hasRole(role) {
   return Boolean(state.backend.principal?.roles?.includes(role));
 }
 
+async function refreshEnterpriseFromBackend() {
+  if (!backendApi) {
+    ensureDefaultDetectionRules();
+    renderEnterprise();
+    return;
+  }
+  try {
+    const [settings, rules] = await Promise.all([backendApi.enterpriseSettings(), backendApi.listDetectionRules()]);
+    saveJson(STORAGE_KEYS.enterpriseSettings, settings);
+    saveJson(STORAGE_KEYS.detectionRules, rules.length ? rules : enterpriseDefaultRules());
+  } catch (error) {
+    ensureDefaultDetectionRules();
+    if (state.backend.online) showToast(`Enterprise sync unavailable: ${error.message}`, "warn");
+  }
+  renderEnterprise();
+}
+
+function ensureDefaultDetectionRules() {
+  const rules = loadJson(STORAGE_KEYS.detectionRules, []);
+  if (!rules.length) saveJson(STORAGE_KEYS.detectionRules, enterpriseDefaultRules());
+  if (!loadJson(STORAGE_KEYS.enterpriseSettings, null)) saveJson(STORAGE_KEYS.enterpriseSettings, defaultEnterpriseSettingsClient());
+}
+
+function enterpriseDefaultRules() {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "builtin-public-admin-rejects",
+      name: "Public admin probing",
+      description: "Repeated rejected traffic to SSH/RDP/SMB/database ports.",
+      query: "action:REJECT port:22",
+      severity: "high",
+      tactic: "Reconnaissance",
+      technique: "Active Scanning",
+      attackId: "T1595",
+      status: "production",
+      enabled: true,
+      owner: "SignalPrism",
+      builtIn: true,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "builtin-lateral-sensitive-access",
+      name: "Accepted sensitive lateral access",
+      description: "Accepted internal access to administrative or database services.",
+      query: "action:ACCEPT port:5432",
+      severity: "medium",
+      tactic: "Lateral Movement",
+      technique: "Remote Services",
+      attackId: "T1021",
+      status: "production",
+      enabled: true,
+      owner: "SignalPrism",
+      builtIn: true,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "builtin-high-egress",
+      name: "High-volume external egress",
+      description: "Large accepted public transfer that may require ownership review.",
+      query: "action:ACCEPT bytes>1000000",
+      severity: "medium",
+      tactic: "Exfiltration",
+      technique: "Exfiltration Over Web Service",
+      attackId: "T1567",
+      status: "test",
+      enabled: true,
+      owner: "SignalPrism",
+      builtIn: true,
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+}
+
+function defaultEnterpriseSettingsClient() {
+  return {
+    id: "default",
+    securityLake: { enabled: false, bucket: "", prefix: "custom/SignalPrismNDR", region: "us-east-1", format: "ocsf-ndjson" },
+    siem: { target: "Security Lake", endpoint: "", exportMode: "manual" },
+    governance: { evidenceRetentionDays: 90, legalHold: false, exportApprovalRequired: true, auditRetentionDays: 2555, scimEnabled: false },
+    dataPlatform: { analyticsStore: "Security Lake + Athena", searchStore: "", archiveStore: "S3 Object Lock evidence packages", queryEngine: "Athena" }
+  };
+}
+
+function enterpriseSettingsValue() {
+  return { ...defaultEnterpriseSettingsClient(), ...(loadJson(STORAGE_KEYS.enterpriseSettings, null) || {}) };
+}
+
+async function renderEnterprise() {
+  if (!els.enterpriseMetricGrid) return;
+  ensureDefaultDetectionRules();
+  const settings = enterpriseSettingsValue();
+  syncEnterpriseInputs(settings);
+  const cases = await listCaseRecords().catch(() => []);
+  const readiness = buildEnterpriseReadiness(cases);
+  els.enterpriseReadinessLabel.textContent = `${readiness.score}% enterprise ready`;
+  els.enterpriseMetricGrid.innerHTML = [
+    metricTemplate("Readiness", `${readiness.score}%`, readiness.blockers.length ? `${readiness.blockers.length} gaps` : "operational"),
+    metricTemplate("Source ownership", `${readiness.ownerCoverage}%`, `${formatNumber(readiness.sourcesOwned)} of ${formatNumber(readiness.sourcesTotal)} sources`),
+    metricTemplate("Rule coverage", formatNumber(readiness.rulesProduction), `${formatNumber(readiness.rulesTotal)} analytics`),
+    metricTemplate("Open incidents", formatNumber(readiness.openCases), `${formatNumber(readiness.highCases)} high severity`),
+    metricTemplate("OCSF pipeline", settings.securityLake?.bucket ? "Ready" : "Draft", settings.siem?.target || "Security Lake")
+  ].join("");
+  renderEnterpriseCoverage();
+  renderDetectionRules();
+  renderSecurityLakeManifest();
+  renderAssetContext();
+  renderInvestigationGraph();
+  renderPolicyFindings();
+  renderIncidentOps(cases);
+  renderQualityDashboard(cases);
+  renderGovernanceReadiness(readiness, settings);
+}
+
+function syncEnterpriseInputs(settings) {
+  if (document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) && document.activeElement.closest("#enterprisePanel")) return;
+  els.securityLakeBucketInput.value = settings.securityLake?.bucket || "";
+  els.securityLakePrefixInput.value = settings.securityLake?.prefix || "custom/SignalPrismNDR";
+  els.siemTargetInput.value = settings.siem?.target || "Security Lake";
+  els.siemEndpointInput.value = settings.siem?.endpoint || "";
+  els.retentionDaysInput.value = settings.governance?.evidenceRetentionDays || 90;
+  els.legalHoldInput.checked = Boolean(settings.governance?.legalHold);
+  els.exportApprovalInput.checked = settings.governance?.exportApprovalRequired !== false;
+  els.analyticsStoreInput.value = settings.dataPlatform?.analyticsStore || "Security Lake + Athena";
+  els.queryEngineInput.value = settings.dataPlatform?.queryEngine || "";
+}
+
+function buildEnterpriseReadiness(cases = []) {
+  const sources = loadJson(STORAGE_KEYS.sources, []);
+  const rules = loadJson(STORAGE_KEYS.detectionRules, []);
+  const assets = Object.values(loadJson(STORAGE_KEYS.assetContext, {}));
+  const settings = enterpriseSettingsValue();
+  const sourcesOwned = sources.filter((source) => source.ownerName || source.ownerUserId).length;
+  const rulesProduction = rules.filter((rule) => rule.enabled !== false && rule.status === "production").length;
+  const openCases = cases.filter((item) => item.status !== "Closed").length;
+  const highCases = cases.filter((item) => item.status !== "Closed" && item.severity === "high").length;
+  const blockers = [];
+  if (!sources.length) blockers.push("No managed sources");
+  if (sources.length && sourcesOwned < sources.length) blockers.push("Source owners missing");
+  if (!rulesProduction) blockers.push("No production rules");
+  if (!settings.securityLake?.bucket) blockers.push("Security Lake bucket not configured");
+  if (!assets.length) blockers.push("No asset context");
+  if (!settings.governance?.exportApprovalRequired) blockers.push("Export approval disabled");
+  const score = Math.max(0, Math.min(100, 100 - blockers.length * 14 - (state.errors.length ? 8 : 0)));
+  return {
+    score,
+    blockers,
+    ownerCoverage: sources.length ? Math.round((sourcesOwned / sources.length) * 100) : 0,
+    sourcesOwned,
+    sourcesTotal: sources.length,
+    rulesProduction,
+    rulesTotal: rules.length,
+    openCases,
+    highCases
+  };
+}
+
+function renderEnterpriseCoverage() {
+  const sources = loadJson(STORAGE_KEYS.sources, []);
+  const interfaces = new Set(state.records.map((record) => record.interfaceId).filter((value) => value && value !== "-"));
+  const accounts = [...uniqueRawValues("account-id")];
+  const missingOwners = sources.filter((source) => !source.ownerName && !source.ownerUserId);
+  const lines = [
+    enterpriseIssue("Observed accounts", accounts.length ? accounts.join(", ") : "No account IDs in current evidence", accounts.length ? "ok" : "warn"),
+    enterpriseIssue("Observed interfaces", interfaces.size ? [...interfaces].slice(0, 8).join(", ") : "No ENIs observed", interfaces.size ? "ok" : "warn"),
+    enterpriseIssue("Owner gaps", missingOwners.length ? missingOwners.map((source) => source.name).slice(0, 6).join(", ") : "All managed sources have owners", missingOwners.length ? "warn" : "ok"),
+    enterpriseIssue("Log health", state.errors.length ? `${state.errors.length} parser issues need review` : "No parser issues in current evidence", state.errors.length ? "warn" : "ok")
+  ];
+  els.enterpriseCoverageList.innerHTML = lines.join("");
+}
+
+function enterpriseIssue(title, detail, tone = "ok") {
+  return `<div class="issue-item ${tone === "warn" ? "warning" : ""}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div>`;
+}
+
+async function discoverSourcesFromEvidence() {
+  if (!state.records.length) return setInputMessage("Analyze evidence before running source discovery.");
+  const discovered = buildDiscoveredSourcesFromEvidence();
+  if (!discovered.length) return setInputMessage("No account, region, or ENI source candidates were found.");
+  const current = loadJson(STORAGE_KEYS.sources, []);
+  const merged = [...current];
+  for (const source of discovered) {
+    const index = merged.findIndex((item) => item.id === source.id || item.name === source.name);
+    let saved = source;
+    if (backendApi) {
+      try {
+        saved = await backendApi.saveSource(source);
+      } catch (error) {
+        if (state.backend.online) showToast(`Discovered source kept locally: ${error.message}`, "warn");
+      }
+    }
+    if (index >= 0) merged.splice(index, 1, { ...merged[index], ...saved, scope: [...new Set([...(merged[index].scope || []), ...(saved.scope || [])])] });
+    else merged.unshift(saved);
+  }
+  saveJson(STORAGE_KEYS.sources, merged.slice(0, 50));
+  renderCoverage();
+  renderTenantAdmin();
+  renderEnterprise();
+  showToast(`${discovered.length} enterprise source candidate${discovered.length === 1 ? "" : "s"} discovered.`);
+}
+
+function buildDiscoveredSourcesFromEvidence() {
+  const groups = new Map();
+  state.records.forEach((record) => {
+    const account = record.accountId || record.raw?.["account-id"] || "unknown-account";
+    const region = record.raw?.region || record.raw?.["az-id"] || "unknown-region";
+    const key = `${account}:${region}`;
+    if (!groups.has(key)) groups.set(key, { account, region, enis: new Set(), cidrs: new Set() });
+    const group = groups.get(key);
+    if (record.interfaceId && record.interfaceId !== "-") group.enis.add(record.interfaceId);
+    [record.source, record.destination].filter(isPrivateIp).forEach((ip) => group.cidrs.add(`${ip.split(".").slice(0, 2).join(".")}.0.0/16`));
+  });
+  return [...groups.values()]
+    .map((group) => ({
+      id: `discovered-${hashText(`${group.account}:${group.region}`).slice(0, 10)}`,
+      name: `Discovered ${group.account} ${group.region}`,
+      type: "AWS Account",
+      account: group.account,
+      region: group.region === "unknown-region" ? "" : group.region,
+      scope: [...group.enis, ...group.cidrs].slice(0, 40),
+      ownerUserId: "",
+      ownerName: "",
+      createdAt: new Date().toISOString()
+    }))
+    .filter((source) => source.scope.length);
+}
+
+function detectionRulesValue() {
+  ensureDefaultDetectionRules();
+  return loadJson(STORAGE_KEYS.detectionRules, []);
+}
+
+function renderDetectionRules() {
+  const rules = detectionRulesValue();
+  els.detectionRuleCountLabel.textContent = String(rules.length);
+  els.detectionRuleList.innerHTML = rules.length
+    ? rules
+        .map((rule) => `<article class="entity-card">
+          <div class="entity-name">${escapeHtml(rule.name)}</div>
+          <div class="risk-score ${riskClass(rule.severity === "high" ? 85 : rule.severity === "medium" ? 45 : 15)}">${escapeHtml(rule.severity[0].toUpperCase())}</div>
+          <div class="entity-meta">
+            <span class="tag">${escapeHtml(rule.status || "draft")}</span>
+            <span class="tag">${escapeHtml(rule.attackId || rule.tactic || "ATT&CK")}</span>
+            <button class="mini-button" type="button" data-test-rule="${escapeHtml(rule.id)}">Test</button>
+            <button class="mini-button" type="button" data-edit-rule="${escapeHtml(rule.id)}">Edit</button>
+            ${rule.builtIn ? "" : `<button class="mini-button danger" type="button" data-delete-rule="${escapeHtml(rule.id)}">Delete</button>`}
+          </div>
+        </article>`)
+        .join("")
+    : emptyState();
+}
+
+function readDetectionRuleForm() {
+  return {
+    id: els.detectionRuleIdInput.value || undefined,
+    name: els.detectionRuleNameInput.value.trim(),
+    query: els.detectionRuleQueryInput.value.trim(),
+    description: els.detectionRuleDescriptionInput.value.trim(),
+    severity: els.detectionRuleSeverityInput.value,
+    tactic: els.detectionRuleTacticInput.value.trim(),
+    technique: els.detectionRuleTechniqueInput.value.trim(),
+    attackId: els.detectionRuleAttackInput.value.trim(),
+    status: "draft",
+    enabled: true
+  };
+}
+
+function testDetectionRuleForm() {
+  const rule = readDetectionRuleForm();
+  if (!rule.query) return setInputMessage("Enter a rule query before testing.");
+  const result = testDetectionRule(rule);
+  els.detectionRuleResultList.innerHTML = renderRuleTestResult(rule, result);
+}
+
+function testDetectionRuleById(id) {
+  const rule = detectionRulesValue().find((item) => item.id === id);
+  if (!rule) return;
+  const result = testDetectionRule(rule);
+  els.detectionRuleResultList.innerHTML = renderRuleTestResult(rule, result);
+  const updated = { ...rule, testCount: result.count, lastTestedAt: new Date().toISOString(), status: result.count ? rule.status || "test" : "test" };
+  saveDetectionRuleLocal(updated);
+  renderDetectionRules();
+}
+
+function testDetectionRule(rule) {
+  const matches = state.records.filter((record) => matchesHunt(record, rule.query));
+  return { count: matches.length, sample: matches.slice(0, 5) };
+}
+
+function renderRuleTestResult(rule, result) {
+  return `<div class="issue-item"><strong>${escapeHtml(rule.name || "Draft rule")}</strong><span>${formatNumber(result.count)} matching records for ${escapeHtml(rule.query || "no query")}</span></div>${
+    result.sample.length
+      ? result.sample.map((record) => `<div class="issue-item"><strong>${escapeHtml(formatEndpoint(record.source, record.srcPort))} -> ${escapeHtml(formatEndpoint(record.destination, record.dstPort))}</strong><span>${escapeHtml(record.action)} ${escapeHtml(classifyApplication(record))} ${escapeHtml(formatBytes(record.bytes))}</span></div>`).join("")
+      : `<div class="issue-item warning"><strong>No current matches</strong><span>Keep as draft, broaden the query, or test with another evidence set.</span></div>`
+  }`;
+}
+
+async function saveDetectionRuleForm() {
+  const rule = readDetectionRuleForm();
+  if (!rule.name || !rule.query) return setInputMessage("Rule name and query are required.");
+  const tested = testDetectionRule(rule);
+  const savedRule = { ...rule, testCount: tested.count, lastTestedAt: new Date().toISOString(), status: tested.count ? "test" : "draft" };
+  try {
+    let persisted = savedRule;
+    if (backendApi) persisted = await backendApi.saveDetectionRule(savedRule);
+    saveDetectionRuleLocal(persisted);
+    clearDetectionRuleForm();
+    renderEnterprise();
+    showToast("Detection rule saved.");
+  } catch (error) {
+    if (!state.backend.online) {
+      saveDetectionRuleLocal(savedRule);
+      renderEnterprise();
+      showToast("Detection rule saved locally.");
+    } else {
+      setInputMessage(error.message);
+    }
+  }
+}
+
+function saveDetectionRuleLocal(rule) {
+  const rules = detectionRulesValue();
+  const index = rules.findIndex((item) => item.id === rule.id);
+  if (index >= 0) rules.splice(index, 1, rule);
+  else rules.unshift(rule);
+  saveJson(STORAGE_KEYS.detectionRules, rules.slice(0, 100));
+}
+
+function editDetectionRule(id) {
+  const rule = detectionRulesValue().find((item) => item.id === id);
+  if (!rule) return;
+  els.detectionRuleIdInput.value = rule.builtIn ? "" : rule.id;
+  els.detectionRuleNameInput.value = rule.name || "";
+  els.detectionRuleQueryInput.value = rule.query || "";
+  els.detectionRuleDescriptionInput.value = rule.description || "";
+  els.detectionRuleSeverityInput.value = rule.severity || "medium";
+  els.detectionRuleTacticInput.value = rule.tactic || "";
+  els.detectionRuleTechniqueInput.value = rule.technique || "";
+  els.detectionRuleAttackInput.value = rule.attackId || "";
+  els.detectionRuleResultList.innerHTML = `<div class="issue-item"><strong>${escapeHtml(rule.name)}</strong><span>${escapeHtml(rule.description || "Ready to edit or test.")}</span></div>`;
+}
+
+function clearDetectionRuleForm() {
+  els.detectionRuleIdInput.value = "";
+  els.detectionRuleNameInput.value = "";
+  els.detectionRuleQueryInput.value = "";
+  els.detectionRuleDescriptionInput.value = "";
+  els.detectionRuleSeverityInput.value = "medium";
+  els.detectionRuleTacticInput.value = "";
+  els.detectionRuleTechniqueInput.value = "";
+  els.detectionRuleAttackInput.value = "";
+}
+
+function deleteDetectionRuleById(id) {
+  const rule = detectionRulesValue().find((item) => item.id === id);
+  if (!rule || rule.builtIn) return;
+  confirmAction({
+    title: "Delete detection rule?",
+    body: `This removes "${rule.name}" from the tenant rule catalog.`,
+    confirmLabel: "Delete Rule",
+    onConfirm: async () => {
+      try {
+        if (backendApi) await backendApi.deleteDetectionRule(id);
+      } catch (error) {
+        if (state.backend.online) return setInputMessage(error.message);
+      }
+      saveJson(STORAGE_KEYS.detectionRules, detectionRulesValue().filter((item) => item.id !== id));
+      renderEnterprise();
+      showToast("Detection rule deleted.");
+    }
+  });
+}
+
+async function saveEnterpriseIntegration() {
+  const settings = readEnterpriseSettingsForm();
+  await persistEnterpriseSettings(settings, "Integration settings saved.");
+}
+
+async function saveGovernanceControls() {
+  const settings = readEnterpriseSettingsForm();
+  await persistEnterpriseSettings(settings, "Governance controls saved.");
+}
+
+function readEnterpriseSettingsForm() {
+  const current = enterpriseSettingsValue();
+  return {
+    ...current,
+    securityLake: {
+      ...(current.securityLake || {}),
+      bucket: els.securityLakeBucketInput.value.trim(),
+      prefix: els.securityLakePrefixInput.value.trim() || "custom/SignalPrismNDR",
+      region: "us-east-1",
+      format: "ocsf-ndjson"
+    },
+    siem: {
+      ...(current.siem || {}),
+      target: els.siemTargetInput.value,
+      endpoint: els.siemEndpointInput.value.trim(),
+      exportMode: "manual"
+    },
+    governance: {
+      ...(current.governance || {}),
+      evidenceRetentionDays: Number(els.retentionDaysInput.value || 90),
+      legalHold: els.legalHoldInput.checked,
+      exportApprovalRequired: els.exportApprovalInput.checked
+    },
+    dataPlatform: {
+      ...(current.dataPlatform || {}),
+      analyticsStore: els.analyticsStoreInput.value,
+      queryEngine: els.queryEngineInput.value.trim() || els.analyticsStoreInput.value
+    }
+  };
+}
+
+async function persistEnterpriseSettings(settings, successMessage) {
+  let saved = settings;
+  try {
+    if (backendApi) saved = await backendApi.saveEnterpriseSettings(settings);
+  } catch (error) {
+    if (state.backend.online) return setInputMessage(error.message);
+  }
+  saveJson(STORAGE_KEYS.enterpriseSettings, saved);
+  renderEnterprise();
+  showToast(successMessage);
+}
+
+async function exportSecurityLakeOcsf() {
+  if (!state.records.length && !state.analysis?.detections?.length) return setInputMessage("Analyze evidence before exporting OCSF data.");
+  const settings = readEnterpriseSettingsForm();
+  saveJson(STORAGE_KEYS.enterpriseSettings, settings);
+  const networkEvents = buildOcsfNetworkActivity(state.filtered.length ? state.filtered : state.records);
+  const findings = buildOcsfFindings(state.analysis?.detections || []);
+  const lines = [...networkEvents, ...findings].map((item) => JSON.stringify(item));
+  const destination = settings.securityLake.bucket ? `s3://${settings.securityLake.bucket}/${settings.securityLake.prefix}` : "manual-download";
+  let manifest = {
+    id: `security-lake-export-${Date.now()}`,
+    recordCount: networkEvents.length,
+    findingCount: findings.length,
+    destination,
+    format: "ocsf-ndjson",
+    exportedAt: new Date().toISOString()
+  };
+  try {
+    if (backendApi) {
+      manifest = await backendApi.exportSecurityLakeManifest({
+        recordCount: networkEvents.length,
+        findingCount: findings.length,
+        destination,
+        format: "ocsf-ndjson",
+        accountId: [...uniqueRawValues("account-id")][0] || "",
+        region: settings.securityLake.region || "us-east-1"
+      });
+    }
+  } catch (error) {
+    if (state.backend.online) showToast(`Security Lake export was downloaded but not audited: ${error.message}`, "warn");
+  }
+  saveJson(STORAGE_KEYS.securityLakeManifest, manifest);
+  downloadText("signalprism-security-lake-ocsf.ndjson", lines.join("\n") + "\n", "application/x-ndjson");
+  renderEnterprise();
+  showToast("Security Lake OCSF export created.");
+}
+
+function buildOcsfNetworkActivity(records = []) {
+  return records.slice(0, 1000).map((record) => ({
+    category_name: "Network Activity",
+    class_name: "Network Activity",
+    activity_name: record.action === "REJECT" ? "Connection Denied" : "Connection Accepted",
+    time: Number.isFinite(record.start) ? record.start * 1000 : Date.now(),
+    src_endpoint: { ip: record.source, port: record.srcPort, interface_uid: record.interfaceId },
+    dst_endpoint: { ip: record.destination, port: record.dstPort },
+    connection_info: { protocol_name: record.protocol, direction: isPrivateIp(record.source) && !isPrivateIp(record.destination) ? "Outbound" : "Unknown" },
+    traffic: { bytes: record.bytes, packets: record.packets },
+    status: record.action,
+    metadata: { product: { name: "SignalPrism NDR" }, version: "0.2.0" }
+  }));
+}
+
+function buildOcsfFindings(detections = []) {
+  return detections.slice(0, 500).map((detection) => ({
+    category_name: "Findings",
+    class_name: "Security Finding",
+    activity_name: detection.title,
+    severity: detection.severity,
+    confidence: Math.round((detection.confidence || 0) * 100),
+    finding_info: { uid: detection.id, title: detection.title, desc: detection.copy },
+    resources: [{ name: detection.entity || "unknown", type: "network_entity" }],
+    unmapped: { tactic: detection.tactic, technique: detection.technique, tags: detection.tags },
+    metadata: { product: { name: "SignalPrism NDR" }, version: "0.2.0" }
+  }));
+}
+
+function renderSecurityLakeManifest() {
+  const settings = enterpriseSettingsValue();
+  const manifest = loadJson(STORAGE_KEYS.securityLakeManifest, null);
+  els.securityLakeManifestList.innerHTML = [
+    enterpriseIssue("Destination", settings.securityLake?.bucket ? `s3://${settings.securityLake.bucket}/${settings.securityLake.prefix}` : "Manual OCSF download until bucket is configured", settings.securityLake?.bucket ? "ok" : "warn"),
+    enterpriseIssue("SIEM target", `${settings.siem?.target || "Security Lake"}${settings.siem?.endpoint ? ` - ${settings.siem.endpoint}` : ""}`, "ok"),
+    manifest ? enterpriseIssue("Last export", `${formatNumber(manifest.recordCount)} network events, ${formatNumber(manifest.findingCount)} findings at ${formatDate(Date.parse(manifest.exportedAt) / 1000)}`, "ok") : enterpriseIssue("Last export", "No OCSF export created in this browser.", "warn")
+  ].join("");
+}
+
+function applyAssetContextInput() {
+  const parsed = parseAssetContext(els.assetContextInput.value);
+  if (!Object.keys(parsed).length) return setInputMessage("No asset rows were recognized. Use JSONL or CSV with ip/eni/instance and owner fields.");
+  const current = loadJson(STORAGE_KEYS.assetContext, {});
+  saveJson(STORAGE_KEYS.assetContext, { ...current, ...parsed });
+  renderEnterprise();
+  showToast(`${formatNumber(Object.keys(parsed).length)} asset context record${Object.keys(parsed).length === 1 ? "" : "s"} applied.`);
+}
+
+function parseAssetContext(text) {
+  const rows = {};
+  let header = null;
+  String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line, index) => {
+      let item = null;
+      if (line.startsWith("{")) {
+        try {
+          item = JSON.parse(line);
+        } catch {
+          item = null;
+        }
+      } else {
+        const values = parseCsvLine(line);
+        if (index === 0 && values.some((value) => /ip|eni|instance|asset|owner/i.test(value))) {
+          header = values.map((value) => value.trim());
+          return;
+        }
+        if (header) {
+          item = {};
+          header.forEach((field, fieldIndex) => {
+            item[field] = values[fieldIndex];
+          });
+        }
+      }
+      const key = item?.ip || item?.eni || item?.interfaceId || item?.instance || item?.instanceId || item?.asset;
+      if (key) rows[key] = normalizeAssetContext(item);
+    });
+  return rows;
+}
+
+function normalizeAssetContext(item = {}) {
+  return {
+    key: item.ip || item.eni || item.interfaceId || item.instance || item.instanceId || item.asset || "",
+    ip: item.ip || "",
+    eni: item.eni || item.interfaceId || "",
+    instance: item.instance || item.instanceId || "",
+    asset: item.asset || item.name || "",
+    owner: item.owner || item.team || "",
+    criticality: item.criticality || item.tier || "medium",
+    environment: item.environment || item.env || "",
+    account: item.account || item.accountId || "",
+    role: item.role || ""
+  };
+}
+
+function renderAssetContext() {
+  const assets = Object.values(loadJson(STORAGE_KEYS.assetContext, {}));
+  if (!assets.length) {
+    els.assetContextList.innerHTML = `<div class="empty-state"><strong>No asset context</strong><span>Add EC2 tags, CMDB rows, or ownership data to enrich entity triage.</span></div>`;
+    return;
+  }
+  els.assetContextList.innerHTML = assets.slice(0, 8).map((asset) => `<article class="entity-card">
+    <div class="entity-name">${escapeHtml(asset.asset || asset.key)}</div>
+    <div class="risk-score ${asset.criticality === "high" ? "high" : asset.criticality === "medium" ? "medium" : ""}">${escapeHtml(String(asset.criticality || "m")[0].toUpperCase())}</div>
+    <div class="entity-meta">
+      <span class="tag">${escapeHtml(asset.owner || "No owner")}</span>
+      <span class="tag">${escapeHtml(asset.environment || "environment unknown")}</span>
+      <span class="tag mono">${escapeHtml(asset.ip || asset.eni || asset.instance || asset.key)}</span>
+    </div>
+  </article>`).join("");
+}
+
+function renderInvestigationGraph() {
+  const topology = topologyApi?.buildTopology ? topologyApi.buildTopology(state.records) : { nodes: [], edges: [] };
+  const assets = loadJson(STORAGE_KEYS.assetContext, {});
+  const enrichedNodes = topology.nodes.filter((node) => assets[node.key]).length;
+  els.investigationGraphList.innerHTML = [
+    enterpriseIssue("Graph nodes", `${formatNumber(topology.nodes.length)} entities, ${formatNumber(enrichedNodes)} enriched`, topology.nodes.length ? "ok" : "warn"),
+    enterpriseIssue("Graph edges", `${formatNumber(topology.edges.length)} observed communication paths`, topology.edges.length ? "ok" : "warn"),
+    enterpriseIssue("Replay", state.records.length ? "Topology replay is available in the Topology tab." : "Load evidence to enable graph replay.", state.records.length ? "ok" : "warn")
+  ].join("");
+}
+
+function exportInvestigationGraph() {
+  if (!state.records.length) return setInputMessage("Analyze evidence before exporting the investigation graph.");
+  const topology = topologyApi?.buildTopology ? topologyApi.buildTopology(state.records) : { nodes: [], edges: [] };
+  const payload = {
+    product: "SignalPrism NDR",
+    exportedAt: new Date().toISOString(),
+    source: state.fileName || "current evidence",
+    nodes: topology.nodes,
+    edges: topology.edges,
+    assets: loadJson(STORAGE_KEYS.assetContext, {}),
+    detections: state.analysis?.detections || []
+  };
+  downloadText("signalprism-investigation-graph.json", JSON.stringify(payload, null, 2), "application/json");
+  showToast("Investigation graph exported.");
+}
+
+function analyzePolicyInput() {
+  const pasted = parsePolicyRows(els.policyInput.value);
+  const findings = buildPolicyFindings(pasted);
+  saveJson(STORAGE_KEYS.policyFindings, findings);
+  renderPolicyFindings();
+  showToast(`${formatNumber(findings.length)} policy exposure finding${findings.length === 1 ? "" : "s"} generated.`);
+}
+
+function parsePolicyRows(text) {
+  const rows = [];
+  String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      if (line.startsWith("{")) {
+        try {
+          rows.push(JSON.parse(line));
+        } catch {
+          // Ignore malformed rows and continue with deterministic evidence-based checks.
+        }
+      } else {
+        const port = Number((line.match(/\bport[:= ]+(\d+)/i) || [])[1]);
+        rows.push({ raw: line, source: (line.match(/(0\.0\.0\.0\/0|::\/0|\d+\.\d+\.\d+\.\d+\/\d+)/) || [])[1] || "", port, action: /allow|accept/i.test(line) ? "allow" : "" });
+      }
+    });
+  return rows;
+}
+
+function buildPolicyFindings(policyRows = []) {
+  const findings = [];
+  policyRows.forEach((row, index) => {
+    const port = Number(row.port || row.fromPort || row.dstPort || row.destinationPort || 0);
+    const source = String(row.source || row.cidr || row.cidrIp || row.ipRange || "");
+    if (/0\.0\.0\.0\/0|::\/0/.test(source) && SENSITIVE_PORTS.has(port)) {
+      findings.push({ id: `policy-${index}`, severity: "high", title: "Public sensitive service exposure", detail: `${source} can reach ${SENSITIVE_PORTS.get(port)} (${port}) on ${row.resource || row.groupId || "a policy resource"}.` });
+    }
+  });
+  const publicAccepted = state.records.filter((record) => record.action === "ACCEPT" && isPublicIp(record.source) && SENSITIVE_PORTS.has(record.dstPort));
+  if (publicAccepted.length) findings.push({ id: "evidence-public-accepted", severity: "high", title: "Observed accepted public sensitive access", detail: `${formatNumber(publicAccepted.length)} accepted public flows reached sensitive services.` });
+  const highEgress = state.records.filter((record) => record.action === "ACCEPT" && isPrivateIp(record.source) && isPublicIp(record.destination) && record.bytes > 1_000_000);
+  if (highEgress.length) findings.push({ id: "evidence-high-egress", severity: "medium", title: "High-volume public egress", detail: `${formatNumber(highEgress.length)} flows exceeded 1 MB to public destinations.` });
+  if (!findings.length) findings.push({ id: "policy-clean", severity: "low", title: "No critical policy exposure found", detail: "No public sensitive allow rule or matching accepted sensitive flow was identified in the current inputs." });
+  return findings;
+}
+
+function renderPolicyFindings() {
+  const findings = loadJson(STORAGE_KEYS.policyFindings, []);
+  els.policyFindingList.innerHTML = findings.length
+    ? findings.map((finding) => `<div class="issue-item ${finding.severity === "high" ? "warning" : ""}"><strong>${escapeHtml(finding.title)}</strong><span>${escapeHtml(finding.detail)}</span></div>`).join("")
+    : `<div class="empty-state"><strong>No policy analysis yet</strong><span>Paste security group or NACL rules, then analyze exposure against current evidence.</span></div>`;
+}
+
+function renderIncidentOps(cases = []) {
+  if (!cases.length) {
+    els.incidentOpsList.innerHTML = `<div class="empty-state"><strong>No cases yet</strong><span>Create a case from a detection to start incident operations.</span></div>`;
+    return;
+  }
+  els.incidentOpsList.innerHTML = cases.slice(0, 6).map((item) => {
+    const open = item.status !== "Closed";
+    const slaHours = item.severity === "high" ? 4 : item.severity === "medium" ? 24 : 72;
+    return `<div class="issue-item ${open && item.severity === "high" ? "warning" : ""}">
+      <strong>${escapeHtml(item.title)}</strong>
+      <span>${escapeHtml(item.status)} - ${escapeHtml(item.assignee || "Unassigned")} - ${slaHours}h response SLA</span>
+    </div>`;
+  }).join("");
+}
+
+function renderQualityDashboard(cases = []) {
+  const rules = detectionRulesValue();
+  const closed = cases.filter((item) => item.status === "Closed").length;
+  const open = cases.length - closed;
+  const noisyRules = rules.filter((rule) => Number(rule.testCount || 0) > 100).length;
+  const production = rules.filter((rule) => rule.status === "production").length;
+  els.qualityDashboardList.innerHTML = [
+    enterpriseIssue("Case closure", cases.length ? `${formatNumber(closed)} closed, ${formatNumber(open)} open` : "No cases measured yet", cases.length ? "ok" : "warn"),
+    enterpriseIssue("Rule maturity", `${formatNumber(production)} production of ${formatNumber(rules.length)} total rules`, production ? "ok" : "warn"),
+    enterpriseIssue("Noisy analytics", noisyRules ? `${formatNumber(noisyRules)} rules matched more than 100 current records` : "No noisy rules in current test set", noisyRules ? "warn" : "ok"),
+    enterpriseIssue("ATT&CK mapping", `${formatNumber(rules.filter((rule) => rule.attackId).length)} rules mapped to technique IDs`, rules.some((rule) => rule.attackId) ? "ok" : "warn")
+  ].join("");
+}
+
+function renderGovernanceReadiness(readiness, settings) {
+  els.governanceReadinessList.innerHTML = [
+    enterpriseIssue("Evidence retention", `${formatNumber(settings.governance?.evidenceRetentionDays || 90)} days${settings.governance?.legalHold ? " with legal hold" : ""}`, "ok"),
+    enterpriseIssue("Export approval", settings.governance?.exportApprovalRequired ? "Required for controlled evidence sharing" : "Disabled", settings.governance?.exportApprovalRequired ? "ok" : "warn"),
+    enterpriseIssue("Analytics platform", `${settings.dataPlatform?.analyticsStore || "Not selected"} via ${settings.dataPlatform?.queryEngine || "query engine not set"}`, settings.dataPlatform?.analyticsStore ? "ok" : "warn"),
+    ...(readiness.blockers.length ? readiness.blockers.map((blocker) => enterpriseIssue("Readiness gap", blocker, "warn")) : [enterpriseIssue("Readiness gaps", "No major enterprise readiness blockers detected.", "ok")])
+  ].join("");
+}
+
 function renderTopology() {
   if (!topologyApi?.buildTopology) return;
   if (!state.records.length) {
@@ -4377,6 +5147,9 @@ if (typeof module !== "undefined") {
     buildAiEvidenceContextModel,
     buildInvestigationPackageModel,
     buildTopologyReplaySnapshot,
+    buildOcsfNetworkActivity,
+    buildOcsfFindings,
+    buildPolicyFindings,
     SAMPLE_LOG
   };
 }

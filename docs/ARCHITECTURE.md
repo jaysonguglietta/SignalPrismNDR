@@ -48,6 +48,8 @@ Responsibilities:
 - Tenant-scoped local JSON or DynamoDB persistence for workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
 - Full raw evidence package persistence to local object-package files or S3 Object Lock storage.
 - Tenant admin roster and source ownership management.
+- Enterprise settings and detection-rule catalog persistence.
+- Security Lake/OCSF export manifest auditing.
 - Background S3/CloudWatch job runs with polling status.
 - Append-only audit records and export.
 - RBAC-controlled investigation package export.
@@ -74,7 +76,7 @@ Backend persistence:
 
 - `NDR_STORE=local`: JSON/NDJSON files under `NDR_DATA_DIR`.
 - `NDR_STORE=dynamodb`: single-table DynamoDB with `pk`, `sk`, `createdAt`, and serialized `payload`.
-- Tenant-scoped records use partition keys shaped as `TENANT#<tenantId>#<kind>` for `WORKSPACE`, `CASE`, `EVIDENCE`, `SOURCE`, `JOB_RUN`, and `TENANT_USER`.
+- Tenant-scoped records use partition keys shaped as `TENANT#<tenantId>#<kind>` for `WORKSPACE`, `CASE`, `EVIDENCE`, `SOURCE`, `JOB_RUN`, `TENANT_USER`, `DETECTION_RULE`, and `ENTERPRISE_SETTING`.
 - Jobs, runs, and audit records include `tenantId` and are filtered by the resolved principal tenant.
 
 Evidence package persistence:

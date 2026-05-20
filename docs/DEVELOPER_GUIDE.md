@@ -139,6 +139,7 @@ Integration tests validate:
 - Tenant admin users and source ownership.
 - Raw evidence package metadata and local package persistence.
 - Async job run list access.
+- Enterprise settings, detection-rule APIs, Security Lake export manifests, and policy exposure helpers.
 - Viewer write/export/AI restrictions.
 - Disabled Bedrock endpoint behavior.
 - Rate limiting.
@@ -151,6 +152,8 @@ UI flow tests validate:
 - AI summary context content.
 - Investigation package shape and evidence caps.
 - Topology replay timeline state.
+- OCSF network/finding export helpers.
+- Policy exposure analysis.
 
 Visual regression specs cover:
 

@@ -46,6 +46,9 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 8. **Tenant Administration**
    Manage tenant roster entries, roles, source ownership, and accountability for cloud evidence sources.
 
+9. **Enterprise Operations**
+   Manage source discovery, detection rules, Security Lake export, asset context, policy exposure, governance controls, and detection quality.
+
 ## Main Screens
 
 - **Overview**: risk metrics, timeline, priority entities, top destination ports.
@@ -58,6 +61,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 - **Cases**: case intake, queue, notes, severity override, and audit log.
 - **Admin**: tenant users, role intent, source assignments, and ownership list.
 - **Topology**: entity-to-entity path map with playable replay, step controls, scrubber, and recent-event trail.
+- **Enterprise**: readiness score, source discovery, rule lifecycle, OCSF/SIEM export, asset context, policy exposure, quality metrics, and governance posture.
 - **Reports**: Bedrock assistant, analyst summary, policy recommendations, and privacy exports.
 
 ## User Roles
@@ -81,6 +85,10 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - `EvidencePackage`: retained full raw evidence payload with object URI, storage mode, retention policy, and package size.
 - `TenantUser`: tenant roster record with email, role, status, and source assignments.
 - `AsyncJobRun`: background import status, progress, message, timestamps, and resulting evidence package metadata.
+- `DetectionRule`: custom rule with hunt query, severity, ATT&CK mapping, owner, status, and test results.
+- `EnterpriseSettings`: Security Lake/SIEM destination, export controls, retention, legal hold, and analytics-store posture.
+- `AssetContext`: owner, criticality, environment, account, role, IP, ENI, and instance metadata.
+- `PolicyFinding`: exposure finding generated from security policy text plus observed flow evidence.
 - `AuditRecord`: append-only actor/action/detail with retention metadata.
 - `IngestJob`: scheduled S3 or CloudWatch import configuration.
 - `Workspace`: tenant investigation container with evidence snapshot, managed sources, hunts, enrichment, and rule profile.
@@ -98,6 +106,9 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Long S3/CloudWatch imports that need asynchronous status and clear failure reporting.
 - Tenant admins assigning stale or missing source ownership.
 - Retained raw evidence packages that need Object Lock compatible storage and retention governance.
+- Detection rules that need safe testing before production use.
+- Security Lake exports that need OCSF normalization and audit manifests.
+- Asset ownership gaps that reduce response confidence.
 - Audit export and retention expectations in regulated environments.
 
 ## Assumptions
@@ -120,6 +131,7 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Tenant-backed workspace, evidence, source, and case persistence with IndexedDB/local fallback.
 - Tenant admin screen for users, roles, and source ownership.
 - Full raw evidence package storage with local fallback and S3 Object Lock retention.
+- Enterprise command center for source discovery, detection engineering, Security Lake exports, asset context, policy exposure, governance, and quality metrics.
 - Case management and case audit history.
 - Detection explainability and tunable rule profiles.
 - Managed AWS source inventory with direct ingest and schedule creation.

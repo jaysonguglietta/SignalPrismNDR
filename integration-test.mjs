@@ -99,6 +99,31 @@ async function testApiAuth() {
     assert.equal(ownerResponse.status, 200);
     assert.equal((await ownerResponse.json()).ownerUserId, user.id);
 
+    const settingsResponse = await fetch(`${base}/api/enterprise/settings`, { headers: { "x-ndr-api-key": "integration-key" } });
+    assert.equal(settingsResponse.status, 200);
+    assert.equal((await settingsResponse.json()).id, "default");
+
+    const saveSettingsResponse = await fetch(`${base}/api/enterprise/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ securityLake: { bucket: "security-lake-test", prefix: "custom/SignalPrismNDR", region: "us-east-1" }, governance: { evidenceRetentionDays: 365, exportApprovalRequired: true } })
+    });
+    assert.equal(saveSettingsResponse.status, 200);
+    assert.equal((await saveSettingsResponse.json()).securityLake.bucket, "security-lake-test");
+
+    const ruleResponse = await fetch(`${base}/api/detection-rules`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ name: "Integration lateral access", query: "action:ACCEPT port:5432", severity: "medium", tactic: "Lateral Movement", attackId: "T1021" })
+    });
+    assert.equal(ruleResponse.status, 201);
+    const rule = await ruleResponse.json();
+    assert.equal(rule.name, "Integration lateral access");
+
+    const rulesListResponse = await fetch(`${base}/api/detection-rules`, { headers: { "x-ndr-api-key": "integration-key" } });
+    assert.equal(rulesListResponse.status, 200);
+    assert.equal((await rulesListResponse.json()).length, 1);
+
     const caseResponse = await fetch(`${base}/api/cases`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
@@ -136,6 +161,14 @@ async function testApiAuth() {
     });
     assert.equal(exportResponse.status, 200);
     assert.equal((await exportResponse.json()).tenantId, "default");
+
+    const securityLakeResponse = await fetch(`${base}/api/exports/security-lake`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-api-key": "integration-key" },
+      body: JSON.stringify({ recordCount: 12, findingCount: 2, destination: "s3://security-lake-test/custom/SignalPrismNDR", format: "ocsf-ndjson" })
+    });
+    assert.equal(securityLakeResponse.status, 200);
+    assert.equal((await securityLakeResponse.json()).schema, "OCSF");
   } finally {
     await stopServer(server);
     await rm(dataDir, { recursive: true, force: true });
@@ -192,6 +225,13 @@ async function testTenantScopedRbac() {
 
     const viewerUsers = await fetch(`${base}/api/admin/users`, { headers: { "x-ndr-test-principal": viewer } });
     assert.equal(viewerUsers.status, 403);
+
+    const viewerSettingsSave = await fetch(`${base}/api/enterprise/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": viewer },
+      body: JSON.stringify({ governance: { exportApprovalRequired: false } })
+    });
+    assert.equal(viewerSettingsSave.status, 403);
   } finally {
     await stopServer(server);
     await rm(dataDir, { recursive: true, force: true });

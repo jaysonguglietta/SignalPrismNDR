@@ -114,6 +114,7 @@
             <button class="tab" id="casesTab" type="button" role="tab" aria-selected="false" aria-controls="casesPanel" data-tab="cases">Cases</button>
             <button class="tab" id="adminTab" type="button" role="tab" aria-selected="false" aria-controls="adminPanel" data-tab="admin">Admin</button>
             <button class="tab" id="topologyTab" type="button" role="tab" aria-selected="false" aria-controls="topologyPanel" data-tab="topology">Topology</button>
+            <button class="tab" id="enterpriseTab" type="button" role="tab" aria-selected="false" aria-controls="enterprisePanel" data-tab="enterprise">Enterprise</button>
             <button class="tab" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsPanel" data-tab="reports">Reports</button>
           </nav>
 
@@ -696,6 +697,209 @@
                   </div>
                   <div class="quality-list replay-events" id="replayEventList"></div>
                 </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="enterprisePanel" role="tabpanel" aria-labelledby="enterpriseTab" hidden>
+            <div class="analysis-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Enterprise command center</p>
+                    <h2>Operational readiness</h2>
+                  </div>
+                  <span class="panel-note" id="enterpriseReadinessLabel">No evidence loaded</span>
+                </div>
+                <div class="metric-grid compact-metrics" id="enterpriseMetricGrid"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Coverage center</p>
+                    <h2>Source discovery and ownership</h2>
+                  </div>
+                  <button class="ghost-button compact" id="discoverSourcesButton" type="button">Discover From Evidence</button>
+                </div>
+                <div class="quality-list" id="enterpriseCoverageList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Detection engineering</p>
+                    <h2>Rule lifecycle</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="testDetectionRuleButton" type="button">Test</button>
+                    <button class="ghost-button compact" id="saveDetectionRuleButton" type="button">Save Rule</button>
+                  </div>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <input id="detectionRuleIdInput" type="hidden">
+                    <label class="field-label" for="detectionRuleNameInput">Rule name</label>
+                    <input id="detectionRuleNameInput" type="text" placeholder="Accepted sensitive lateral access">
+                    <label class="field-label" for="detectionRuleQueryInput">Hunt query</label>
+                    <input id="detectionRuleQueryInput" type="text" placeholder="action:ACCEPT port:5432">
+                    <label class="field-label" for="detectionRuleDescriptionInput">Description</label>
+                    <textarea id="detectionRuleDescriptionInput" class="short-textarea" spellcheck="true" placeholder="What behavior does this analytic detect?"></textarea>
+                  </div>
+                  <div>
+                    <label class="field-label" for="detectionRuleSeverityInput">Severity</label>
+                    <select id="detectionRuleSeverityInput">
+                      <option value="high">High</option>
+                      <option value="medium" selected>Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                    <label class="field-label" for="detectionRuleTacticInput">ATT&CK tactic</label>
+                    <input id="detectionRuleTacticInput" type="text" placeholder="Lateral Movement">
+                    <label class="field-label" for="detectionRuleTechniqueInput">Technique</label>
+                    <input id="detectionRuleTechniqueInput" type="text" placeholder="Remote Services">
+                    <label class="field-label" for="detectionRuleAttackInput">Technique ID</label>
+                    <input id="detectionRuleAttackInput" type="text" placeholder="T1021">
+                  </div>
+                </div>
+                <div class="quality-list" id="detectionRuleResultList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Detection content</p>
+                    <h2>Rule catalog</h2>
+                  </div>
+                  <span class="severity-count" id="detectionRuleCountLabel">0</span>
+                </div>
+                <div class="entity-list" id="detectionRuleList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Security Lake and SIEM</p>
+                    <h2>OCSF output pipeline</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="saveIntegrationButton" type="button">Save</button>
+                    <button class="ghost-button compact" id="exportSecurityLakeButton" type="button">Export OCSF</button>
+                  </div>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <label class="field-label" for="securityLakeBucketInput">Security Lake bucket</label>
+                    <input id="securityLakeBucketInput" type="text" placeholder="aws-security-data-lake-us-east-1">
+                    <label class="field-label" for="securityLakePrefixInput">Prefix</label>
+                    <input id="securityLakePrefixInput" type="text" placeholder="custom/SignalPrismNDR">
+                  </div>
+                  <div>
+                    <label class="field-label" for="siemTargetInput">SIEM target</label>
+                    <select id="siemTargetInput">
+                      <option value="Security Lake">Security Lake</option>
+                      <option value="Splunk HEC">Splunk HEC</option>
+                      <option value="Elastic">Elastic</option>
+                      <option value="Microsoft Sentinel">Microsoft Sentinel</option>
+                      <option value="Security Hub">Security Hub</option>
+                    </select>
+                    <label class="field-label" for="siemEndpointInput">Endpoint or stream</label>
+                    <input id="siemEndpointInput" type="text" placeholder="https://collector.example.com/services/collector">
+                  </div>
+                </div>
+                <div class="quality-list" id="securityLakeManifestList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Asset and identity context</p>
+                    <h2>Owners, tags, and criticality</h2>
+                  </div>
+                  <button class="ghost-button compact" id="applyAssetContextButton" type="button">Apply</button>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="assetContextInput">Paste JSONL or CSV assets</label>
+                  <textarea id="assetContextInput" class="short-textarea" spellcheck="false" placeholder='{"ip":"10.0.1.15","asset":"prod-payments-api","owner":"Team Ledger","criticality":"high","environment":"prod"}'></textarea>
+                  <div class="hint-row">Accepted keys: ip, eni, instance, asset, owner, criticality, environment, account, role.</div>
+                </div>
+                <div class="entity-list" id="assetContextList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Investigation graph</p>
+                    <h2>Entities and paths</h2>
+                  </div>
+                  <button class="ghost-button compact" id="exportGraphButton" type="button">Export Graph</button>
+                </div>
+                <div class="quality-list" id="investigationGraphList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Policy exposure</p>
+                    <h2>Security group and egress review</h2>
+                  </div>
+                  <button class="ghost-button compact" id="analyzePolicyButton" type="button">Analyze Policy</button>
+                </div>
+                <div class="tool-body">
+                  <label class="field-label" for="policyInput">Paste security group/NACL JSON or rules</label>
+                  <textarea id="policyInput" class="short-textarea" spellcheck="false" placeholder='{"source":"0.0.0.0/0","port":22,"action":"allow","resource":"sg-prod-admin"}'></textarea>
+                </div>
+                <div class="quality-list" id="policyFindingList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Incident response</p>
+                    <h2>Case operations</h2>
+                  </div>
+                </div>
+                <div class="quality-list" id="incidentOpsList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Quality</p>
+                    <h2>Detection efficacy</h2>
+                  </div>
+                </div>
+                <div class="quality-list" id="qualityDashboardList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Governance and data platform</p>
+                    <h2>Controls and deployment posture</h2>
+                  </div>
+                  <button class="ghost-button compact" id="saveGovernanceButton" type="button">Save Controls</button>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <label class="field-label" for="retentionDaysInput">Evidence retention days</label>
+                    <input id="retentionDaysInput" type="number" min="1" value="90">
+                    <label class="check-row"><input id="legalHoldInput" type="checkbox"> Legal hold</label>
+                    <label class="check-row"><input id="exportApprovalInput" type="checkbox" checked> Require export approval</label>
+                  </div>
+                  <div>
+                    <label class="field-label" for="analyticsStoreInput">Analytics store</label>
+                    <select id="analyticsStoreInput">
+                      <option value="Security Lake + Athena">Security Lake + Athena</option>
+                      <option value="OpenSearch">OpenSearch</option>
+                      <option value="ClickHouse">ClickHouse</option>
+                      <option value="Postgres">Postgres</option>
+                      <option value="DynamoDB + S3 evidence packages">DynamoDB + S3 evidence packages</option>
+                    </select>
+                    <label class="field-label" for="queryEngineInput">Query engine</label>
+                    <input id="queryEngineInput" type="text" placeholder="Athena, OpenSearch SQL, ClickHouse SQL">
+                  </div>
+                </div>
+                <div class="quality-list" id="governanceReadinessList"></div>
               </article>
             </div>
           </section>

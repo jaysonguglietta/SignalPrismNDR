@@ -132,7 +132,7 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 - Azure NSG Flow Log JSON.
 - GCP VPC Flow Log JSON.
 
-Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, raw evidence package references, managed source definitions, tenant admin records, async job runs, and controlled investigation exports are persisted through tenant-scoped APIs.
+Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, raw evidence package references, managed source definitions, enterprise settings, detection rules, tenant admin records, async job runs, and controlled investigation exports are persisted through tenant-scoped APIs.
 
 ## NDR detections
 
@@ -178,6 +178,8 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - Detection explainability, confidence interpretation, and tunable rule profiles.
 - Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, prefixes, direct ingest, and schedule creation.
 - Tenant admin screen for users, roles, and managed source ownership.
+- Enterprise command center for readiness scoring, source discovery, detection rule lifecycle, asset context, policy exposure review, quality metrics, and governance controls.
+- Security Lake/SIEM OCSF NDJSON export with backend audit manifest support.
 - Full raw evidence packages in local package storage or S3 Object Lock storage with retention metadata.
 - Async CloudWatch/S3 import runs with polling status and completion/failure notifications.
 - RBAC-controlled portable investigation package export.
@@ -199,4 +201,8 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - `TenantUser`: tenant roster entry with email, role, status, and owned/assigned sources.
 - `EvidencePackage`: full raw evidence package with bounded record sample, analysis summary, object URI, retention deadline, and storage mode.
 - `AsyncJobRun`: queued, running, completed, or failed import execution with progress, status message, and evidence package reference.
+- `DetectionRule`: custom analytic with hunt query, severity, ATT&CK mapping, owner, status, and test history.
+- `EnterpriseSettings`: tenant governance, Security Lake/SIEM, retention, and data platform posture.
+- `AssetContext`: owner, environment, criticality, account, role, IP, ENI, and instance metadata.
+- `PolicyFinding`: public exposure, sensitive access, and high-volume egress review finding.
 - `AuditRecord`: append-only actor, role, action, details, creation time, and retention deadline.

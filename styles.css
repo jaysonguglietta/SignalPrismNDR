@@ -501,6 +501,10 @@ select[multiple] {
   margin-bottom: 14px;
 }
 
+.compact-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
 .metric {
   min-height: 108px;
   padding: 16px;
@@ -738,6 +742,10 @@ select[multiple] {
   display: block;
   color: var(--ink);
   font-size: 0.82rem;
+}
+
+.issue-item.warning strong {
+  color: var(--danger);
 }
 
 .inline-action {

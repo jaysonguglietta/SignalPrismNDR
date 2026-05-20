@@ -235,6 +235,21 @@ Open `Topology` to visualize entity-to-entity paths. Move the replay slider to f
 
 Use topology to explain lateral paths, high-volume egress, and repeated external contacts.
 
+## Enterprise Command Center
+
+Open `Enterprise` for the controls that make SignalPrism usable in larger security programs:
+
+- **Operational readiness** scores source ownership, rule maturity, Security Lake configuration, asset context, and governance controls.
+- **Source discovery** extracts accounts, ENIs, CIDR hints, and source candidates from current evidence, then adds them to managed source inventory.
+- **Detection engineering** lets analysts create hunt-query-backed rules, map them to ATT&CK, test them against current evidence, and maintain a rule catalog.
+- **Security Lake and SIEM** exports OCSF NDJSON for network activity and security findings, and records an audited backend export manifest when the backend is available.
+- **Asset and identity context** accepts JSONL or CSV rows with owners, assets, criticality, environment, account, role, IP, ENI, or instance IDs.
+- **Investigation graph** summarizes graph nodes, communication paths, enrichment coverage, and exports graph JSON.
+- **Policy exposure** accepts security group or NACL-style rules and compares them with observed accepted sensitive access and high-volume public egress.
+- **Incident operations** summarizes open cases and response SLA expectations.
+- **Detection quality** tracks case closure, production-rule count, noisy analytics, and ATT&CK mapping coverage.
+- **Governance and data platform** stores retention, legal hold, export approval, analytics store, and query-engine posture.
+
 ## Reports And AI Assistant
 
 Open `Reports`.

@@ -23,6 +23,10 @@ All notable changes to SignalPrism NDR are tracked here.
 - Tenant admin screen and APIs for users, roles, and managed source ownership.
 - Async CloudWatch/S3 import execution with status polling and completion/failure notifications.
 - Optional Playwright visual regression configuration and desktop/mobile snapshot specs.
+- Enterprise command center with readiness scoring, source discovery, detection rule lifecycle, asset context, policy exposure review, quality metrics, and governance controls.
+- Tenant-scoped enterprise settings and detection-rule APIs with RBAC and audit coverage.
+- Security Lake/SIEM OCSF NDJSON export with backend manifest auditing.
+- Investigation graph JSON export and enriched asset ownership posture.
 
 ## 0.2.0 - 2026-05-05
 

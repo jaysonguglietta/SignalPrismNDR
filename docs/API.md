@@ -249,6 +249,64 @@ Request:
 }
 ```
 
+## Enterprise Endpoints
+
+### `GET /api/enterprise/settings`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns tenant enterprise posture settings for Security Lake, SIEM, governance, and data platform readiness.
+
+### `POST /api/enterprise/settings`
+
+Protected. Requires `admin`. Saves tenant enterprise settings and writes an audit event.
+
+Request:
+
+```json
+{
+  "securityLake": {
+    "bucket": "aws-security-data-lake-us-east-1",
+    "prefix": "custom/SignalPrismNDR",
+    "region": "us-east-1",
+    "format": "ocsf-ndjson"
+  },
+  "governance": {
+    "evidenceRetentionDays": 365,
+    "legalHold": false,
+    "exportApprovalRequired": true
+  },
+  "dataPlatform": {
+    "analyticsStore": "Security Lake + Athena",
+    "queryEngine": "Athena"
+  }
+}
+```
+
+### `GET /api/detection-rules`
+
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns tenant detection engineering rules.
+
+### `POST /api/detection-rules`
+
+Protected. Requires `admin` or `analyst`. Creates or updates a tenant detection rule.
+
+Request:
+
+```json
+{
+  "name": "Accepted sensitive lateral access",
+  "query": "action:ACCEPT port:5432",
+  "severity": "medium",
+  "tactic": "Lateral Movement",
+  "technique": "Remote Services",
+  "attackId": "T1021",
+  "status": "test"
+}
+```
+
+### `DELETE /api/detection-rules/{id}`
+
+Protected. Requires `admin`. Deletes a tenant detection rule.
+
 ### `GET /api/cases`
 
 Protected. Requires `admin`, `analyst`, or `viewer`. Returns tenant cases.
@@ -268,6 +326,23 @@ Protected. Requires `admin`.
 ### `POST /api/exports/investigation`
 
 Protected. Requires `admin` or `analyst`. Stamps tenant/export metadata and writes an audit event before the browser downloads the package.
+
+### `POST /api/exports/security-lake`
+
+Protected. Requires `admin` or `analyst`. Stamps an OCSF/Security Lake export manifest and writes an audit event. The browser creates the OCSF NDJSON payload; the backend records destination, counts, schema, partition hint, and actor.
+
+Request:
+
+```json
+{
+  "recordCount": 1200,
+  "findingCount": 8,
+  "destination": "s3://aws-security-data-lake-us-east-1/custom/SignalPrismNDR",
+  "format": "ocsf-ndjson",
+  "accountId": "123456789012",
+  "region": "us-east-1"
+}
+```
 
 ## Ingest Endpoints
 

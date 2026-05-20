@@ -49,6 +49,8 @@ Local mode stores:
 - `sources.json`
 - `job-runs.json`
 - `tenant-users.json`
+- `detection-rules.json`
+- `enterprise-settings.json`
 - `audit.ndjson`
 
 DynamoDB mode uses:
@@ -56,7 +58,7 @@ DynamoDB mode uses:
 - Partition key: `pk`
 - Sort key: `sk`
 - Record payload: JSON string in `payload`
-- Tenant partitions: `TENANT#<tenantId>#WORKSPACE`, `TENANT#<tenantId>#CASE`, `TENANT#<tenantId>#EVIDENCE`, `TENANT#<tenantId>#SOURCE`, `TENANT#<tenantId>#JOB_RUN`, and `TENANT#<tenantId>#TENANT_USER`.
+- Tenant partitions: `TENANT#<tenantId>#WORKSPACE`, `TENANT#<tenantId>#CASE`, `TENANT#<tenantId>#EVIDENCE`, `TENANT#<tenantId>#SOURCE`, `TENANT#<tenantId>#JOB_RUN`, `TENANT#<tenantId>#TENANT_USER`, `TENANT#<tenantId>#DETECTION_RULE`, and `TENANT#<tenantId>#ENTERPRISE_SETTING`.
 
 ## AWS Credentials
 

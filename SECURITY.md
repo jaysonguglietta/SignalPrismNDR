@@ -43,7 +43,7 @@ The browser uses Authorization Code with PKCE through `/api/auth/token`; do not 
 
 - Flow logs can contain internal IPs, account IDs, ENIs, and infrastructure metadata.
 - Redacted export is available in the UI.
-- Tenant workspaces, cases, evidence-run samples, managed sources, tenant users, jobs, async job runs, and ingest metadata are stored under `NDR_DATA_DIR` for local mode or in DynamoDB when `NDR_STORE=dynamodb`.
+- Tenant workspaces, cases, evidence-run samples, managed sources, tenant users, enterprise settings, detection rules, jobs, async job runs, and ingest metadata are stored under `NDR_DATA_DIR` for local mode or in DynamoDB when `NDR_STORE=dynamodb`.
 - Full raw evidence packages are stored separately from evidence-run metadata. Local mode writes them under `.ndr-data/evidence-packages/`; production should use an S3 bucket with Object Lock enabled through `NDR_EVIDENCE_BUCKET`.
 - Audit records are append-only NDJSON in local mode and append-only DynamoDB records in DynamoDB mode. Each record includes `retentionUntil` based on `NDR_AUDIT_RETENTION_DAYS`.
 - The Terraform production stack creates an S3 audit bucket with Object Lock COMPLIANCE retention for immutable exported audit evidence.
@@ -66,6 +66,7 @@ The AWS Bedrock assistant is disabled unless `NDR_BEDROCK_ENABLED=true`. When en
 - Use least-privilege IAM policies for S3 and CloudWatch Logs.
 - Use DynamoDB for tenant workspaces, cases, evidence metadata, sources, jobs, runs, and audit records; use encrypted EFS only for local scratch/evidence storage.
 - Use S3 Object Lock for retained raw evidence packages and choose retention mode/days before production rollout.
+- Treat OCSF/Security Lake exports, detection rules, asset context, and policy findings as tenant security data subject to audit and retention controls.
 - Store `NDR_API_KEY` and any OIDC client secret in Secrets Manager.
 - Keep the Bedrock feature flag off in environments that are not approved for AI-assisted analysis.
 - Forward JSON logs to your SIEM.

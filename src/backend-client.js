@@ -78,6 +78,26 @@ export async function assignSourceOwner(sourceId, ownerId) {
   return apiPost("/api/admin/source-owners", { sourceId, ownerId });
 }
 
+export async function enterpriseSettings() {
+  return apiGet("/api/enterprise/settings");
+}
+
+export async function saveEnterpriseSettings(settings) {
+  return apiPost("/api/enterprise/settings", settings);
+}
+
+export async function listDetectionRules() {
+  return apiGet("/api/detection-rules");
+}
+
+export async function saveDetectionRule(rule) {
+  return apiPost("/api/detection-rules", rule);
+}
+
+export async function deleteDetectionRule(id) {
+  return apiDelete(`/api/detection-rules/${encodeURIComponent(id)}`);
+}
+
 export async function listCases() {
   return apiGet("/api/cases");
 }
@@ -96,6 +116,10 @@ export async function listCaseAudit(id) {
 
 export async function exportInvestigationPackage(payload) {
   return apiPost("/api/exports/investigation", payload);
+}
+
+export async function exportSecurityLakeManifest(payload) {
+  return apiPost("/api/exports/security-lake", payload);
 }
 
 export async function ingestS3(config) {

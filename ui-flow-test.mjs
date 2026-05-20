@@ -8,6 +8,9 @@ const {
   analyzeRecords,
   buildAiEvidenceContextModel,
   buildInvestigationPackageModel,
+  buildOcsfFindings,
+  buildOcsfNetworkActivity,
+  buildPolicyFindings,
   buildTopologyReplaySnapshot,
   parseVpcFlowLog,
   tuneAnalysisForProfile
@@ -26,6 +29,12 @@ assertIncludes(html, 'id="adminTab"', "tenant admin tab should exist");
 assertIncludes(html, 'id="saveTenantUserButton"', "tenant user save control should exist");
 assertIncludes(html, 'id="assignSourceOwnerButton"', "source ownership assignment should exist");
 assertIncludes(html, 'id="backendJobRunsList"', "async job run status list should exist");
+assertIncludes(html, 'id="enterpriseTab"', "enterprise command center tab should exist");
+assertIncludes(html, 'id="discoverSourcesButton"', "source discovery workflow should exist");
+assertIncludes(html, 'id="saveDetectionRuleButton"', "detection rule lifecycle should exist");
+assertIncludes(html, 'id="exportSecurityLakeButton"', "Security Lake export should exist");
+assertIncludes(html, 'id="applyAssetContextButton"', "asset context workflow should exist");
+assertIncludes(html, 'id="analyzePolicyButton"', "policy exposure workflow should exist");
 
 const parsed = parseVpcFlowLog(SAMPLE_LOG);
 const analysis = analyzeRecords(parsed.records, parsed.errors);
@@ -69,6 +78,15 @@ const replay = buildTopologyReplaySnapshot(parsed.records, 50);
 assert.ok(replay.includedRecords.length > 0, "replay should include records at midpoint");
 assert.ok(replay.includedRecords.length <= parsed.records.length, "replay should not exceed source records");
 assert.ok(replay.recentRecords.length > 0, "replay should expose recent timeline events");
+
+const ocsfNetwork = buildOcsfNetworkActivity(parsed.records);
+assert.equal(ocsfNetwork[0].class_name, "Network Activity", "Security Lake export should include OCSF network activity");
+
+const ocsfFindings = buildOcsfFindings(analysis.detections);
+assert.equal(ocsfFindings[0].class_name, "Security Finding", "Security Lake export should include OCSF findings");
+
+const policyFindings = buildPolicyFindings([{ source: "0.0.0.0/0", port: 22, action: "allow", resource: "sg-admin" }]);
+assert.ok(policyFindings.some((finding) => finding.severity === "high"), "policy analysis should flag public sensitive services");
 
 console.log("ui flow checks passed");
 
