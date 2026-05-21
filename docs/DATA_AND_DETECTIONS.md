@@ -115,8 +115,12 @@ Entity risk combines:
 - Peer count.
 - Data volume.
 - External exposure.
+- Loaded threat-intelligence matches.
+- Asset criticality from asset context.
 
 The score is intended for triage order, not as a standalone severity.
+
+The Enterprise workspace also calculates an explainable entity risk list. Each score includes the main reasons, such as public sensitive probing, accepted lateral access, high-volume egress, matched indicators, or high-criticality assets.
 
 ## Detection Explainability
 
@@ -138,6 +142,35 @@ SignalPrism supports rule tuning profiles:
 
 The active profile is reflected in metrics, saved with workspaces, included in AI context, and exported in investigation packages.
 
+## Detection-As-Code Model
+
+Tenant detection rules include:
+
+- Hunt query.
+- Severity.
+- ATT&CK tactic, technique, and technique ID.
+- Owner.
+- Status: `draft`, `test`, `production`, or `retired`.
+- Version and approval metadata.
+- Test count and last-tested timestamp.
+
+The Enterprise workspace can clone, test, promote, retire, score, and export these rules as `signalprism.detections.v1` JSON.
+
+## Threat Intelligence Model
+
+Threat-intelligence imports accept JSONL or CSV with indicator fields:
+
+- `indicator`, `ip`, `domain`, or `value`
+- `type`
+- `severity`
+- `label`
+- `source`
+- `confidence`
+- `firstSeen`
+- `lastSeen`
+
+Indicators are stored as tenant enterprise artifacts when the backend is online and mirrored in browser storage for offline enrichment.
+
 ## Path Ranking
 
 Paths are ranked by bytes, packets, and frequency. Internal and external paths are shown separately to help analysts distinguish lateral movement from egress.
@@ -145,6 +178,8 @@ Paths are ranked by bytes, packets, and frequency. Internal and external paths a
 ## Topology Replay
 
 Topology replay uses normalized record timestamps to build a cutoff view of entity-to-entity paths. The scrubber, play control, and step controls all use the same deterministic replay snapshot: included records, cutoff time, and recent-event trail.
+
+Enterprise replay export creates a JSON incident reconstruction timeline that overlays flow events with detection milestones.
 
 ## Enrichment Model
 
@@ -174,6 +209,20 @@ Enrichment is stored in browser storage and can be included in tenant workspace 
 - Redacted JSON for privacy-aware sharing.
 - Investigation package JSON for complete case handoff. Backend-enabled exports are RBAC-controlled and audited.
 - Backend audit NDJSON.
+- Detection-as-code JSON.
+- Investigation graph JSON.
+- Replay timeline JSON.
+- Security Lake OCSF NDJSON.
+
+## Enterprise Artifacts
+
+The backend stores advanced workflow outputs as tenant-scoped `EnterpriseArtifact` records:
+
+- `COPILOT_NOTE`: evidence-cited deterministic answer.
+- `THREAT_INTEL`: indicator import payload.
+- `PLAYBOOK_RUN`: case-linked response steps.
+- `EVIDENCE_VAULT_BUNDLE`: retention and chain-of-custody manifest.
+- `ENTERPRISE_REPORT`: analyst, executive, compliance, or manager report.
 
 The raw evidence package is not the same as the analyst investigation package. Evidence packages are retention-oriented source artifacts; investigation packages are bounded handoff artifacts.
 

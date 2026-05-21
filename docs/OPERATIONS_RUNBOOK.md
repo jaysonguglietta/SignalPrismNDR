@@ -137,6 +137,21 @@ Actions:
 4. Confirm model access and region.
 5. Reduce context size if request payload is too large.
 
+### Enterprise Artifact Save Fails
+
+Symptoms:
+
+- Copilot notes, threat-intel imports, playbook runs, vault bundles, or reports save only locally.
+- The UI shows an artifact persistence warning.
+
+Actions:
+
+1. Confirm the user has `admin` or `analyst` role.
+2. Confirm `/api/enterprise/artifacts` is reachable.
+3. Confirm `NDR_DATA_DIR` is writable in local mode.
+4. In DynamoDB mode, confirm the table allows `ENTERPRISE_ARTIFACT` partition writes.
+5. Review audit logs for `enterprise.artifact.saved` or related errors.
+
 ## Backup And Recovery
 
 ### Browser Data
@@ -156,11 +171,14 @@ Back up `NDR_DATA_DIR`:
 - `evidence-packages/`
 - `sources.json`
 - `tenant-users.json`
+- `detection-rules.json`
+- `enterprise-settings.json`
+- `enterprise-artifacts.json`
 - `audit.ndjson`
 
 ### DynamoDB Mode
 
-Terraform enables point-in-time recovery. Confirm backups and retention with account policy. Tenant-scoped workspaces, cases, evidence runs, managed sources, tenant users, and async job runs use `TENANT#<tenantId>#<kind>` partition keys.
+Terraform enables point-in-time recovery. Confirm backups and retention with account policy. Tenant-scoped workspaces, cases, evidence runs, managed sources, tenant users, detection rules, enterprise settings, enterprise artifacts, and async job runs use `TENANT#<tenantId>#<kind>` partition keys.
 
 ### Audit Exports
 
@@ -179,6 +197,7 @@ Recommended recurring tasks:
 - Review CloudWatch log retention.
 - Confirm DynamoDB point-in-time recovery remains enabled.
 - Confirm evidence package retention and Object Lock mode match policy.
+- Review enterprise artifacts for stale threat-intel imports, unfinished playbooks, old reports, and vault bundles nearing retention deadlines.
 - Confirm Bedrock model allow-list and approval status.
 - Run `npm run check` before deployment.
 - Review scheduled job errors.

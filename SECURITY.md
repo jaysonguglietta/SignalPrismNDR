@@ -31,9 +31,9 @@ Set `NDR_API_KEY` for shared or network-accessible deployments. Clients must sen
 
 For SSO, configure `NDR_OIDC_ISSUER`, `NDR_OIDC_CLIENT_ID`, `NDR_OIDC_AUDIENCE`, and the group mapping variables. The backend verifies RS256 JWTs against the issuer JWKS and maps identity-provider groups to these roles:
 
-- `admin`: full tenant access, tenant user/source ownership management, destructive deletes, ingest, controlled exports, and audit export.
-- `analyst`: manage tenant workspaces, cases, sources, evidence runs, ingest, schedules, investigation exports, and AI actions.
-- `viewer`: read tenant workspaces, cases, sources, evidence runs, jobs, and run history.
+- `admin`: full tenant access, tenant user/source ownership management, enterprise settings, destructive deletes, ingest, controlled exports, and audit export.
+- `analyst`: manage tenant workspaces, cases, sources, evidence runs, enterprise artifacts, ingest, schedules, investigation exports, and AI actions.
+- `viewer`: read tenant workspaces, cases, sources, evidence runs, jobs, run history, enterprise settings, detection rules, and enterprise artifacts.
 
 Tenant ownership is resolved from `NDR_TENANT_CLAIM` for OIDC and `NDR_DEFAULT_TENANT` for API-key/local-dev sessions.
 
@@ -64,9 +64,9 @@ The AWS Bedrock assistant is disabled unless `NDR_BEDROCK_ENABLED=true`. When en
 - Put the container behind HTTPS.
 - Run Fargate tasks in private subnets behind the ALB and require OIDC/SSO for shared deployments.
 - Use least-privilege IAM policies for S3 and CloudWatch Logs.
-- Use DynamoDB for tenant workspaces, cases, evidence metadata, sources, jobs, runs, and audit records; use encrypted EFS only for local scratch/evidence storage.
+- Use DynamoDB for tenant workspaces, cases, evidence metadata, sources, enterprise artifacts, jobs, runs, and audit records; use encrypted EFS only for local scratch/evidence storage.
 - Use S3 Object Lock for retained raw evidence packages and choose retention mode/days before production rollout.
-- Treat OCSF/Security Lake exports, detection rules, asset context, and policy findings as tenant security data subject to audit and retention controls.
+- Treat OCSF/Security Lake exports, detection rules, enterprise artifacts, threat intelligence, asset context, playbooks, vault manifests, and policy findings as tenant security data subject to audit and retention controls.
 - Store `NDR_API_KEY` and any OIDC client secret in Secrets Manager.
 - Keep the Bedrock feature flag off in environments that are not approved for AI-assisted analysis.
 - Forward JSON logs to your SIEM.

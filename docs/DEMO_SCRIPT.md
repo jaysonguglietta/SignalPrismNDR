@@ -59,13 +59,29 @@ Open `Cases`.
 
 Show the demo case, status, severity, assignee, notes, and audit trail.
 
-## 7. Use AI Assistance
+## 7. Show Enterprise Operations
+
+Open `Enterprise`.
+
+Show:
+
+- Evidence-cited investigator copilot.
+- Source health and threat-intelligence import.
+- Detection-as-code quality, clone, promote, and export.
+- Entity risk scoring explanations.
+- Response playbooks, evidence vault bundles, and stakeholder reports.
+
+Say:
+
+> This is the enterprise layer: governance, repeatable detection content, retained artifacts, and response workflows around the investigation.
+
+## 8. Use AI Assistance
 
 Open `Reports`.
 
 Show Bedrock prompt presets. If Bedrock is disabled, point out the disabled state and explain the feature flag. If enabled, run `Top risk explanation`.
 
-## 8. Export Package
+## 9. Export Package
 
 Select `Package`.
 
@@ -73,13 +89,13 @@ Say:
 
 > The package is a portable investigation handoff: detections, observations, top entities, managed sources, cases, summaries, AI output, and bounded evidence samples.
 
-## 9. Close With Deployment
+## 10. Close With Deployment
 
 Summarize:
 
 - Local browser analysis.
 - Backend AWS ingest.
 - OIDC/RBAC.
-- DynamoDB persistence.
+- DynamoDB persistence for tenant data and enterprise artifacts.
 - ECS/Fargate Terraform.
 - S3 Object Lock audit retention.

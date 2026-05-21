@@ -76,7 +76,7 @@ Backend persistence:
 
 - `NDR_STORE=local`: JSON/NDJSON files under `NDR_DATA_DIR`.
 - `NDR_STORE=dynamodb`: single-table DynamoDB with `pk`, `sk`, `createdAt`, and serialized `payload`.
-- Tenant-scoped records use partition keys shaped as `TENANT#<tenantId>#<kind>` for `WORKSPACE`, `CASE`, `EVIDENCE`, `SOURCE`, `JOB_RUN`, `TENANT_USER`, `DETECTION_RULE`, and `ENTERPRISE_SETTING`.
+- Tenant-scoped records use partition keys shaped as `TENANT#<tenantId>#<kind>` for `WORKSPACE`, `CASE`, `EVIDENCE`, `SOURCE`, `JOB_RUN`, `TENANT_USER`, `DETECTION_RULE`, `ENTERPRISE_SETTING`, and `ENTERPRISE_ARTIFACT`.
 - Jobs, runs, and audit records include `tenantId` and are filtered by the resolved principal tenant.
 
 Evidence package persistence:
@@ -110,8 +110,8 @@ Tenant mapping:
 Authorization boundaries:
 
 - `admin`: full tenant access, tenant roster/source ownership management, destructive deletes, audit export.
-- `analyst`: create/update tenant workspaces, cases, sources, evidence runs, ingest jobs, AI actions, and investigation exports.
-- `viewer`: read-only tenant inspection. AI and exports are blocked.
+- `analyst`: create/update tenant workspaces, cases, sources, evidence runs, enterprise artifacts, ingest jobs, AI actions, and investigation exports.
+- `viewer`: read-only tenant inspection for workspaces, cases, sources, evidence runs, detection rules, enterprise settings, and enterprise artifacts. AI and exports are blocked.
 
 ## Deployment Architecture
 

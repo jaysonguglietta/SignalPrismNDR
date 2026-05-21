@@ -2,6 +2,8 @@
 
 SignalPrism NDR includes an optional AWS Bedrock assistant for natural-language investigation questions and AI-generated summaries.
 
+The Enterprise workspace also includes a deterministic evidence-cited copilot that runs without Bedrock. It generates local answers with explicit citations to flows, detections, cases, asset context, and threat-intel matches. Use Bedrock when you want model-generated reasoning or narrative summaries; use the cited copilot when you need an auditable local answer path.
+
 ## Feature Flag
 
 The assistant is disabled by default.

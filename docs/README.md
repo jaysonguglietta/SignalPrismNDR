@@ -1,11 +1,11 @@
 # SignalPrism NDR Documentation
 
-SignalPrism NDR is a cloud-ready Network Detection and Response workbench for AWS VPC Flow Logs and adjacent flow telemetry. It helps analysts turn raw network evidence into detections, entity risk, topology paths, cases, exports, and optional AWS Bedrock-assisted summaries.
+SignalPrism NDR is a cloud-ready Network Detection and Response workbench for AWS VPC Flow Logs and adjacent flow telemetry. It helps analysts turn raw network evidence into detections, entity risk, topology paths, cases, evidence-cited answers, playbooks, retained artifacts, exports, and optional AWS Bedrock-assisted summaries.
 
 ## Documentation Map
 
 - [Product Brief](PRODUCT_BRIEF.md): target users, outcomes, workflows, acceptance criteria.
-- [User Guide](USER_GUIDE.md): how analysts upload evidence, triage detections, hunt, manage cases, administer tenants, and export reports.
+- [User Guide](USER_GUIDE.md): how analysts upload evidence, triage detections, hunt, use enterprise workflows, manage cases, administer tenants, and export reports.
 - [Architecture](ARCHITECTURE.md): frontend, backend, persistence, AWS integrations, and deployment shape.
 - [API Reference](API.md): backend endpoints, authentication, request examples, and role requirements.
 - [Configuration](CONFIGURATION.md): environment variables and local/cloud configuration patterns.

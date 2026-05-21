@@ -31,6 +31,7 @@ All notable changes to SignalPrism NDR are tracked here.
 - Response playbooks, evidence vault bundle manifests, replay timeline export, stakeholder report modes, and tenant admin readiness checks.
 - Security Lake/SIEM OCSF NDJSON export with backend manifest auditing.
 - Investigation graph JSON export and enriched asset ownership posture.
+- Documentation refresh across user, operator, deployment, architecture, API, data model, and Terraform guides for advanced enterprise workflows.
 
 ## 0.2.0 - 2026-05-05
 

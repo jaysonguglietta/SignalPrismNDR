@@ -95,9 +95,9 @@ Tokens must be RS256 signed. The backend checks issuer, optional audience, expir
 
 RBAC is enforced server-side:
 
-- `admin`: full tenant access, tenant user/source ownership management, source/case/job deletes, audit export.
-- `analyst`: save workspaces, cases, sources, evidence runs, run/schedule ingest, export investigations, and invoke Bedrock.
-- `viewer`: read tenant workspaces, cases, sources, evidence runs, jobs, and runs.
+- `admin`: full tenant access, tenant user/source ownership management, source/case/job deletes, enterprise settings, audit export.
+- `analyst`: save workspaces, cases, sources, evidence runs, enterprise artifacts, run/schedule ingest, export investigations, and invoke Bedrock.
+- `viewer`: read tenant workspaces, cases, sources, evidence runs, jobs, runs, enterprise settings, detection rules, and enterprise artifacts.
 
 ## Bedrock AI Assistant
 

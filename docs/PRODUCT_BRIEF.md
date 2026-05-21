@@ -47,7 +47,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
    Manage tenant roster entries, roles, source ownership, and accountability for cloud evidence sources.
 
 9. **Enterprise Operations**
-   Manage source discovery, detection rules, Security Lake export, asset context, policy exposure, governance controls, and detection quality.
+   Manage cited investigation answers, source health, threat intelligence, entity risk scoring, detection-as-code, Security Lake export, replay timelines, response playbooks, evidence vault bundles, stakeholder reports, governance controls, and detection quality.
 
 ## Main Screens
 
@@ -61,14 +61,14 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 - **Cases**: case intake, queue, notes, severity override, and audit log.
 - **Admin**: tenant users, role intent, source assignments, and ownership list.
 - **Topology**: entity-to-entity path map with playable replay, step controls, scrubber, and recent-event trail.
-- **Enterprise**: readiness score, source discovery, rule lifecycle, OCSF/SIEM export, asset context, policy exposure, quality metrics, and governance posture.
+- **Enterprise**: readiness score, cited copilot, source health, source discovery, threat intelligence, entity risk scoring, rule lifecycle, detection-as-code, OCSF/SIEM export, asset context, graph/replay export, policy exposure, playbooks, evidence vault, reports, quality metrics, and governance posture.
 - **Reports**: Bedrock assistant, analyst summary, policy recommendations, and privacy exports.
 
 ## User Roles
 
-- `admin`: full tenant access, destructive deletes, audit export, ingest, controlled exports, and AI assistant.
-- `analyst`: create/update workspaces, cases, sources, evidence runs, ingest, scheduled job creation, job execution, controlled exports, and AI assistant.
-- `viewer`: tenant read access without mutating cases, sources, exports, AI, or ingest schedules.
+- `admin`: full tenant access, destructive deletes, enterprise settings, audit export, ingest, controlled exports, and AI assistant.
+- `analyst`: create/update workspaces, cases, sources, evidence runs, enterprise artifacts, ingest, scheduled job creation, job execution, controlled exports, and AI assistant.
+- `viewer`: tenant read access without mutating cases, sources, enterprise artifacts, exports, AI, or ingest schedules.
 
 Local development runs as `local-dev` admin when neither API key nor OIDC is configured.
 
@@ -85,8 +85,13 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - `EvidencePackage`: retained full raw evidence payload with object URI, storage mode, retention policy, and package size.
 - `TenantUser`: tenant roster record with email, role, status, and source assignments.
 - `AsyncJobRun`: background import status, progress, message, timestamps, and resulting evidence package metadata.
-- `DetectionRule`: custom rule with hunt query, severity, ATT&CK mapping, owner, status, and test results.
+- `DetectionRule`: custom rule with hunt query, severity, ATT&CK mapping, owner, version, approval metadata, lifecycle status, and test results.
 - `EnterpriseSettings`: Security Lake/SIEM destination, export controls, retention, legal hold, and analytics-store posture.
+- `EnterpriseArtifact`: tenant-scoped copilot note, threat-intel import, playbook run, evidence vault bundle, report, or export artifact.
+- `ThreatIntelIndicator`: IP/domain indicator with severity, source, label, confidence, and first/last seen values.
+- `PlaybookRun`: case-linked response template with step owners and status.
+- `EvidenceVaultBundle`: retention and chain-of-custody manifest with hash and storage posture.
+- `EnterpriseReport`: stakeholder report for analyst, executive, compliance, or manager audiences.
 - `AssetContext`: owner, criticality, environment, account, role, IP, ENI, and instance metadata.
 - `PolicyFinding`: exposure finding generated from security policy text plus observed flow evidence.
 - `AuditRecord`: append-only actor/action/detail with retention metadata.

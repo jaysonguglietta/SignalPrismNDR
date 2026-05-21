@@ -206,13 +206,18 @@ Use `Async` on a scheduled job to queue a background CloudWatch or S3 import. Th
 
 Open `Enterprise` for advanced NDR operations:
 
+- `Operational readiness`: scores source ownership, rule maturity, Security Lake configuration, asset context, and governance controls.
 - `Investigator copilot`: generates deterministic natural-language answers with citations to detections, flows, cases, assets, and threat-intel matches.
 - `Source health`: checks managed source ownership, observed scope, async import status, and parser drift.
+- `Source discovery`: extracts accounts, ENIs, CIDR hints, and source candidates from current evidence.
 - `Threat intelligence`: imports JSONL or CSV indicators and enriches current evidence.
 - `Entity risk`: calculates explainable risk scores from detections, sensitive flows, asset criticality, and threat intelligence.
 - `Detection engineering`: creates, tests, clones, promotes, and exports detection-as-code rules.
 - `Security Lake and SIEM`: creates OCSF NDJSON exports and records backend manifests.
+- `Asset and identity context`: accepts owners, assets, criticality, environment, account, role, IP, ENI, or instance IDs.
 - `Investigation graph` and `Timeline replay`: export entity graphs and incident reconstruction timelines.
+- `Policy exposure`: compares pasted security group or NACL-style rules with observed sensitive access and high-volume egress.
+- `Incident operations` and `Detection quality`: summarize case SLA pressure, production-rule maturity, noisy analytics, and ATT&CK mapping coverage.
 - `Response playbooks`: creates case-linked containment, lateral movement, egress, and executive briefing runs.
 - `Evidence vault`: creates retention and chain-of-custody manifests for investigation packages.
 - `Enterprise reporting`: generates analyst, executive, compliance, and operations-manager reports.
@@ -250,21 +255,6 @@ This roster documents SignalPrism ownership and access intent. It does not modif
 Open `Topology` to visualize entity-to-entity paths. Move the replay slider to focus on activity up to a point in time, use `Play` for replay, or step backward and forward through the timeline. The recent-event trail shows the latest records included at the current replay position.
 
 Use topology to explain lateral paths, high-volume egress, and repeated external contacts.
-
-## Enterprise Command Center
-
-Open `Enterprise` for the controls that make SignalPrism usable in larger security programs:
-
-- **Operational readiness** scores source ownership, rule maturity, Security Lake configuration, asset context, and governance controls.
-- **Source discovery** extracts accounts, ENIs, CIDR hints, and source candidates from current evidence, then adds them to managed source inventory.
-- **Detection engineering** lets analysts create hunt-query-backed rules, map them to ATT&CK, test them against current evidence, and maintain a rule catalog.
-- **Security Lake and SIEM** exports OCSF NDJSON for network activity and security findings, and records an audited backend export manifest when the backend is available.
-- **Asset and identity context** accepts JSONL or CSV rows with owners, assets, criticality, environment, account, role, IP, ENI, or instance IDs.
-- **Investigation graph** summarizes graph nodes, communication paths, enrichment coverage, and exports graph JSON.
-- **Policy exposure** accepts security group or NACL-style rules and compares them with observed accepted sensitive access and high-volume public egress.
-- **Incident operations** summarizes open cases and response SLA expectations.
-- **Detection quality** tracks case closure, production-rule count, noisy analytics, and ATT&CK mapping coverage.
-- **Governance and data platform** stores retention, legal hold, export approval, analytics store, and query-engine posture.
 
 ## Reports And AI Assistant
 

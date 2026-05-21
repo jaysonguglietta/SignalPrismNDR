@@ -33,6 +33,7 @@ This mode enables:
 - Async CloudWatch/S3 job status polling.
 - Local backend audit.
 - Local raw evidence package files.
+- Local enterprise artifact persistence for copilot notes, threat-intel imports, playbook runs, evidence vault bundles, and reports.
 - Optional API key.
 - Optional OIDC.
 - Optional Bedrock.
@@ -134,7 +135,7 @@ NDR_DDB_TABLE=<table>
 
 Enable point-in-time recovery and server-side encryption. Terraform does this by default.
 
-DynamoDB stores tenant-scoped workspaces, cases, evidence-run metadata, managed sources, tenant users, jobs, async job runs, ingest runs, and audit records. Configure `NDR_DEFAULT_TENANT` for API-key deployments and `NDR_TENANT_CLAIM` for OIDC deployments.
+DynamoDB stores tenant-scoped workspaces, cases, evidence-run metadata, managed sources, tenant users, enterprise settings, detection rules, enterprise artifacts, jobs, async job runs, ingest runs, and audit records. Configure `NDR_DEFAULT_TENANT` for API-key deployments and `NDR_TENANT_CLAIM` for OIDC deployments.
 
 ## Evidence Package Storage
 
@@ -181,5 +182,7 @@ Then validate:
 - Async source/job ingest reports completion or failure.
 - Job create/run/delete follows role rules.
 - Tenant admin user and source ownership flows work for admins and are blocked for viewers.
+- Enterprise artifact creation works for analysts/admins and is read-only for viewers.
+- Detection-as-code export, threat-intel import, evidence vault bundle, and stakeholder report flows work.
 - Audit export works for admins.
 - Bedrock config reflects expected enabled/disabled state.

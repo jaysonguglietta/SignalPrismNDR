@@ -6,7 +6,7 @@ This Terraform module provisions a production-oriented AWS path for SignalPrism 
 - ECS Fargate cluster, task definition, service, and CPU autoscaling
 - Application Load Balancer with health checks and optional HTTPS listener
 - Encrypted EFS access point mounted at `/mnt/ndr-data`
-- DynamoDB table for tenant workspaces, cases, evidence runs, managed sources, jobs, ingest runs, and audit records
+- DynamoDB table for tenant workspaces, cases, evidence runs, managed sources, detection rules, enterprise settings, enterprise artifacts, jobs, ingest runs, and audit records
 - Secrets Manager secrets for `NDR_API_KEY` and optional OIDC client secret
 - CloudWatch Logs with configurable retention
 - S3 audit bucket with versioning, public access block, encryption, and Object Lock COMPLIANCE retention
@@ -40,7 +40,7 @@ terraform apply \
 
 ## Persistence
 
-Production defaults to `NDR_STORE=dynamodb`. Local JSON persistence remains available for development, but DynamoDB should be used for shared environments because it survives task replacement and supports point-in-time recovery. Tenant-scoped objects use `TENANT#<tenantId>#<kind>` partitions for workspaces, cases, evidence metadata, managed sources, tenant users, and async job runs.
+Production defaults to `NDR_STORE=dynamodb`. Local JSON persistence remains available for development, but DynamoDB should be used for shared environments because it survives task replacement and supports point-in-time recovery. Tenant-scoped objects use `TENANT#<tenantId>#<kind>` partitions for workspaces, cases, evidence metadata, managed sources, tenant users, detection rules, enterprise settings, enterprise artifacts, and async job runs.
 
 EFS is still mounted for local scratch data and fallback package storage. It is encrypted at rest and mounted with an access point.
 

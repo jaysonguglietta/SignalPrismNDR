@@ -38,7 +38,7 @@ Cloud ingest uses environment credentials:
 AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_SESSION_TOKEN=... npm start
 ```
 
-The backend stores tenant workspaces, cases, evidence-run metadata, managed sources, job metadata, async job runs, tenant users, ingest runs, and audit records under `.ndr-data/` by default. Set `NDR_STORE=dynamodb` and `NDR_DDB_TABLE` to use DynamoDB for the tenant store.
+The backend stores tenant workspaces, cases, evidence-run metadata, managed sources, job metadata, async job runs, tenant users, enterprise settings, detection rules, enterprise artifacts, ingest runs, and audit records under `.ndr-data/` by default. Set `NDR_STORE=dynamodb` and `NDR_DDB_TABLE` to use DynamoDB for the tenant store.
 
 Full raw evidence packages are written to local object-package storage under `.ndr-data/evidence-packages/` by default. Set `NDR_EVIDENCE_BUCKET` to write packages to S3 with Object Lock retention headers controlled by `NDR_EVIDENCE_RETENTION_DAYS` and `NDR_EVIDENCE_OBJECT_LOCK_MODE`.
 
@@ -120,7 +120,8 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 9. Track managed sources, coverage, ingest history, async job status, and saved baselines, then ingest or schedule CloudWatch/S3 imports directly from source inventory.
 10. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
 11. Manage tenant users, roles, and source ownership from the Admin screen.
-12. Simulate traffic reduction policies and export detections, records, and full investigation packages.
+12. Use the Enterprise workspace for cited answers, threat intel, detection-as-code, playbooks, vault bundles, reports, and governance readiness.
+13. Simulate traffic reduction policies and export detections, records, and full investigation packages.
 
 ## Supported input
 
@@ -132,7 +133,7 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 - Azure NSG Flow Log JSON.
 - GCP VPC Flow Log JSON.
 
-Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, raw evidence package references, managed source definitions, enterprise settings, detection rules, tenant admin records, async job runs, and controlled investigation exports are persisted through tenant-scoped APIs.
+Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, raw evidence package references, managed source definitions, enterprise settings, detection rules, enterprise artifacts, tenant admin records, async job runs, and controlled investigation exports are persisted through tenant-scoped APIs.
 
 ## NDR detections
 
@@ -168,7 +169,7 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - Backend S3 and CloudWatch ingest with AWS SigV4 signing.
 - Scheduled local ingest jobs.
 - API key protection, OIDC/SSO login with RBAC, rate limiting, request-size limits, security headers, structured logs, health/readiness, and Prometheus-style metrics.
-- DynamoDB persistence option for tenant workspaces, cases, evidence runs, managed sources, jobs, runs, and audit records.
+- DynamoDB persistence option for tenant workspaces, cases, evidence runs, managed sources, enterprise artifacts, jobs, runs, and audit records.
 - Append-only audit export with retention metadata and Terraform Object Lock retention.
 - Feature-flagged AWS Bedrock assistant for natural-language investigation questions and AI-generated summaries.
 - Bedrock prompt presets for top risk, executive summary, attack path, containment, evidence gaps, and SIEM query ideas.
