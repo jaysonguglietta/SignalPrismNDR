@@ -4,7 +4,40 @@ All notable changes to SignalPrism NDR are tracked here.
 
 ## Unreleased
 
+### Security
+
+- Closed all twelve findings from the 2026-07-17 adversarial review: unified ingest policy, lossless S3 checkpoints, line-isolated parsing, SHA-256 event IDs, immutable detection backtests, governed response targets, fail-closed retention, direct evidence uploads, sealed browser caching, packet provenance, signed scan attestations, and durable stream outbox/replay.
+- Replaced principal-bearing browser cookies with opaque server-side sessions; added OIDC discovery issuer binding, JWKS refresh, strict key eligibility, production MFA step-up, and AWS credential response validation.
+- Added explicit least-privilege source access modes, atomic case/rule transitions, dual-read DynamoDB migration, distributed rate/AI quotas, CSV formula neutralization, and strict invalid-timestamp quarantine.
+
+- Added server-side session registration and revocation, strict production startup validation, OIDC claim/time validation, CSRF-protected logout, constant-time API-key checks, and bounded per-IP/per-principal rate limiting.
+- Enforced tenant and source ownership for managed ingest, tenant-scoped DynamoDB keys, conditional scheduler/run leases, per-tenant quotas, and fail-closed local persistence.
+- Added two-person, expiring, one-time export approvals with conditional state changes, pending-request quotas, and Security Lake SHA-256 evidence binding.
+- Restricted production detection-rule changes to tenant admins with passing tests, ATT&CK metadata, substantive descriptions, and separate author/approver enforcement.
+- Bounded JSON, upload, decompression, AWS response, and Bedrock context inputs; constrained AWS/OIDC endpoints and credential-provider URLs; labeled AI evidence as untrusted data.
+- Added SHA-256 evidence digests, HMAC-SHA256 evidence-vault attestations, session-scoped export pseudonyms, immutable local package creation, and S3 Object Lock/TLS enforcement.
+- Hardened Fargate, ALB, WAF, EFS, IAM, network egress, secrets injection, logging, alarms, image-digest deployment, Docker runtime controls, and CI supply-chain checks.
+- Expanded integration and Playwright coverage for auth, isolation, ownership, approvals, body/rate limits, AWS signing, upload, tuning, AI summary, export, topology, and tenant administration.
+
 ### Added
+
+- Added an in-product analyst learning center with an NDR lifecycle, telemetry limitations, severity-versus-urgency guidance, live workflow links, an investigation playbook, a glossary, guided-demo practice, and desktop/mobile regression coverage.
+
+- Added multi-cloud, Kubernetes, Cilium, Gigamon/IPFIX/CEF, and ExtraHop normalization.
+- Added explainable behavior profiles, attack campaigns, retrospective hunts, and detection backtests.
+- Added deterministic and optional Bedrock investigation runs with evidence citations, feedback, AI service posture, and cryptography posture.
+- Added native OCSF 1.8 and Security Lake OCSF 1.3 validation profiles, Firehose batching, dynamic partitions, Zstandard Parquet conversion, Glue catalog, and KMS-backed analytics storage. OCSF 1.4 remains migration-only.
+- Added Organizations discovery, cross-account source onboarding, and a StackSets-ready member-account role.
+- Added governed connector records, EventBridge adapter tests, advanced response intents, dry runs, verification, and rollback.
+- Added SCIM user lifecycle provisioning, custom roles, expiring service accounts, rotation, revocation, and source scoping.
+- Added direct-to-S3 immutable evidence uploads with browser hashing and completion verification.
+- Added the responsive Platform operator workspace plus unit, API, UI contract, and visual regression coverage.
+
+- Durable SQS ingest queue and DLQ, separate API/worker process roles, Fargate worker autoscaling, queue metrics, and age/dead-letter alarms.
+- Normalized CloudTrail, Route 53 DNS, GuardDuty, Zeek, and Suricata telemetry ingestion with evidence-linked cross-source correlation.
+- Two-person response actions with approval-only defaults and optional EventBridge execution/archive.
+- Ed25519-signed detection content verification and admin-only import into governed test status.
+- Enterprise readiness API/UI, signal-fusion dashboard, governed response console, signed-content review, contract tests, and deployment posture checks.
 
 - Local investigation workspaces with evidence snapshot restore.
 - Guided demo mode with sample evidence, managed sources, prompt preset, and starter case.

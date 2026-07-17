@@ -1,5 +1,10 @@
 export async function backendHealth() {
-  return apiGet("/api/health");
+  const health = await apiGet("/api/health");
+  try {
+    return { ...(await apiGet("/api/status")), ...health };
+  } catch {
+    return health;
+  }
 }
 
 export async function authConfig() {
@@ -86,6 +91,218 @@ export async function saveEnterpriseSettings(settings) {
   return apiPost("/api/enterprise/settings", settings);
 }
 
+export async function enterpriseReadiness() {
+  return apiGet("/api/enterprise/readiness");
+}
+
+export async function operationsSummary() {
+  return apiGet("/api/operations/summary");
+}
+
+export async function runOperationsAnalysis(options = {}) {
+  return apiPost("/api/operations/analyze", options);
+}
+
+export async function schemaProfiles() {
+  return apiGet("/api/schema/profiles");
+}
+
+export async function validateSchemaProfile(profile, limit = 1000) {
+  return apiPost("/api/schema/validate", { profile, limit });
+}
+
+export async function listSecurityLakeSources() {
+  return apiGet("/api/security-lake/sources");
+}
+
+export async function configureSecurityLakeSources(config) {
+  return apiPost("/api/security-lake/sources/register", config);
+}
+
+export async function streamControl() {
+  return apiGet("/api/streams/control");
+}
+
+export async function replayStream(config) {
+  return apiPost("/api/streams/replay", config);
+}
+
+export async function createSearchJob(query, limit = 500) {
+  return apiPost("/api/search/jobs", { query, limit });
+}
+
+export async function listSensors() {
+  return apiGet("/api/sensors");
+}
+
+export async function saveSensor(sensor) {
+  return apiPost("/api/sensors", sensor);
+}
+
+export async function listPacketManifests() {
+  return apiGet("/api/packet-manifests");
+}
+
+export async function savePacketManifest(manifest) {
+  return apiPost("/api/packet-manifests", manifest);
+}
+
+export async function authorizePacketAccess(id, reason, minutes = 15) {
+  return apiPost(`/api/packet-manifests/${encodeURIComponent(id)}/authorize`, { reason, minutes });
+}
+
+export async function responsePolicy() {
+  return apiGet("/api/response-policy");
+}
+
+export async function saveResponsePolicy(policy) {
+  return apiPost("/api/response-policy", policy);
+}
+
+export async function setResponseKillSwitch(enabled) {
+  return apiPost("/api/response-policy/kill-switch", { enabled });
+}
+
+export async function listThreatIntelFeeds() {
+  return apiGet("/api/threat-intel/feeds");
+}
+
+export async function saveThreatIntelFeed(feed) {
+  return apiPost("/api/threat-intel/feeds", feed);
+}
+
+export async function runThreatIntelRetromatch() {
+  return apiPost("/api/threat-intel/retromatch", {});
+}
+
+export async function listCaseTasks(caseId = "") {
+  return apiGet(`/api/case-tasks${caseId ? `?caseId=${encodeURIComponent(caseId)}` : ""}`);
+}
+
+export async function saveCaseTask(task) {
+  return apiPost("/api/case-tasks", task);
+}
+
+export async function deleteCaseTask(id) {
+  return apiDelete(`/api/case-tasks/${encodeURIComponent(id)}`);
+}
+
+export async function listGovernanceResources(path) {
+  const allowed = new Set(["pipeline-policy", "exposure-context", "regional-cells", "provider-workspaces", "notification-policies", "agent/evaluations"]);
+  if (!allowed.has(path)) throw new Error("Unsupported governance resource");
+  return apiGet(`/api/${path}`);
+}
+
+export async function saveGovernanceResource(path, record) {
+  const allowed = new Set(["pipeline-policy", "exposure-context", "regional-cells", "provider-workspaces", "notification-policies"]);
+  if (!allowed.has(path)) throw new Error("Unsupported governance resource");
+  return apiPost(`/api/${path}`, record);
+}
+
+export async function evaluateAgent(payload) {
+  return apiPost("/api/agent/evaluations", payload);
+}
+
+export async function listTelemetryEvents(format = "") {
+  return apiGet(`/api/telemetry/events${format ? `?format=${encodeURIComponent(format)}` : ""}`);
+}
+
+export async function ingestTelemetry(format, payload) {
+  return apiPost("/api/telemetry/events", { format, payload });
+}
+
+export async function runTelemetryCorrelation(windowMinutes = 60) {
+  return apiPost("/api/telemetry/correlate", { windowMinutes });
+}
+
+export async function listCorrelations() {
+  return apiGet("/api/correlations");
+}
+
+export async function streamStatus() {
+  return apiGet("/api/stream/status");
+}
+
+export async function streamTelemetry(format, payload) {
+  return apiPost("/api/stream/events", { format, payload });
+}
+
+export async function behaviorAnalytics() {
+  return apiGet("/api/analytics/behavior");
+}
+
+export async function runBehaviorAnalytics(options = {}) {
+  return apiPost("/api/analytics/behavior", options);
+}
+
+export async function listCampaigns() {
+  return apiGet("/api/campaigns");
+}
+
+export async function buildCampaigns(options = {}) {
+  return apiPost("/api/campaigns/build", options);
+}
+
+export async function listRetrospectiveHunts() {
+  return apiGet("/api/hunts/retrospective");
+}
+
+export async function runRetrospectiveHunt(query, limit = 500) {
+  return apiPost("/api/hunts/retrospective", { query, limit });
+}
+
+export async function trafficPosture() {
+  return apiGet("/api/governance/traffic-posture");
+}
+
+export async function runTrafficPosture(aiPolicy = {}) {
+  return apiPost("/api/governance/traffic-posture", { aiPolicy });
+}
+
+export async function listResponseActions() {
+  return apiGet("/api/response-actions");
+}
+
+export async function requestResponseAction(action) {
+  return apiPost("/api/response-actions", action);
+}
+
+export async function approveResponseAction(id) {
+  return apiPost(`/api/response-actions/${encodeURIComponent(id)}/approve`, {});
+}
+
+export async function responseAdapters() {
+  return apiGet("/api/response-adapters");
+}
+
+export async function verifyResponseAction(id, successful, evidence) {
+  return apiPost(`/api/response-actions/${encodeURIComponent(id)}/verify`, { successful, evidence });
+}
+
+export async function rollbackResponseAction(id, reason, executionMode = "dry-run") {
+  return apiPost(`/api/response-actions/${encodeURIComponent(id)}/rollback`, { reason, executionMode });
+}
+
+export async function listDetectionContentBundles() {
+  return apiGet("/api/detection-content/bundles");
+}
+
+export async function verifyDetectionContent(bundle) {
+  return apiPost("/api/detection-content/verify", { bundle });
+}
+
+export async function importDetectionContent(bundle) {
+  return apiPost("/api/detection-content/import", { bundle });
+}
+
+export async function listExportApprovals() {
+  return apiGet("/api/export-approvals");
+}
+
+export async function approveExport(id) {
+  return apiPost(`/api/export-approvals/${encodeURIComponent(id)}/approve`, {});
+}
+
 export async function listEnterpriseArtifacts(type = "") {
   return apiGet(`/api/enterprise/artifacts${type ? `?type=${encodeURIComponent(type)}` : ""}`);
 }
@@ -104,6 +321,14 @@ export async function listDetectionRules() {
 
 export async function saveDetectionRule(rule) {
   return apiPost("/api/detection-rules", rule);
+}
+
+export async function promoteDetectionRule(id, status = "production") {
+  return apiPost(`/api/detection-rules/${encodeURIComponent(id)}/promote`, { status });
+}
+
+export async function backtestDetectionRule(id, labels = {}) {
+  return apiPost(`/api/detection-rules/${encodeURIComponent(id)}/backtest`, { labels });
 }
 
 export async function deleteDetectionRule(id) {
@@ -132,6 +357,104 @@ export async function exportInvestigationPackage(payload) {
 
 export async function exportSecurityLakeManifest(payload) {
   return apiPost("/api/exports/security-lake", payload);
+}
+
+export async function publishSecurityLake(payload = {}) {
+  return apiPost("/api/security-lake/publish", payload);
+}
+
+export async function connectorCatalog() {
+  return apiGet("/api/connectors/catalog");
+}
+
+export async function listConnectors() {
+  return apiGet("/api/connectors");
+}
+
+export async function saveConnector(connector) {
+  return apiPost("/api/connectors", connector);
+}
+
+export async function testConnector(id) {
+  return apiPost(`/api/connectors/${encodeURIComponent(id)}/test`, {});
+}
+
+export async function deleteConnector(id) {
+  return apiDelete(`/api/connectors/${encodeURIComponent(id)}`);
+}
+
+export async function listOrganizationAccounts() {
+  return apiGet("/api/organization/accounts");
+}
+
+export async function discoverOrganizationAccounts() {
+  return apiPost("/api/organization/discover", {});
+}
+
+export async function onboardOrganizationAccount(id, config) {
+  return apiPost(`/api/organization/accounts/${encodeURIComponent(id)}/onboard`, config);
+}
+
+export async function listEvidenceUploads() {
+  return apiGet("/api/evidence-uploads");
+}
+
+export async function createEvidenceUpload(metadata) {
+  return apiPost("/api/evidence-uploads", metadata);
+}
+
+export async function completeEvidenceUpload(id, sha256) {
+  return apiPost(`/api/evidence-uploads/${encodeURIComponent(id)}/complete`, { sha256 });
+}
+
+export async function uploadEvidenceFile(file, onProgress) {
+  const sha256 = await browserSha256(file);
+  const session = await createEvidenceUpload({ fileName: file.name, contentType: file.type || "application/octet-stream", contentLength: file.size, sha256 });
+  if (onProgress) onProgress({ phase: "uploading", loaded: 0, total: file.size });
+  const response = await fetch(session.uploadUrl, { method: "PUT", headers: session.requiredHeaders, body: file, mode: "cors" });
+  if (!response.ok) throw new Error(`Evidence object upload failed (${response.status})`);
+  if (onProgress) onProgress({ phase: "verifying", loaded: file.size, total: file.size });
+  return completeEvidenceUpload(session.id, sha256);
+}
+
+export async function listAiInvestigations() {
+  return apiGet("/api/ai/investigations");
+}
+
+export async function runAiInvestigation(payload) {
+  return apiPost("/api/ai/investigate", payload);
+}
+
+export async function saveAiInvestigationFeedback(id, rating, comment = "") {
+  return apiPost(`/api/ai/investigations/${encodeURIComponent(id)}/feedback`, { rating, comment });
+}
+
+export async function listRoleDefinitions() {
+  return apiGet("/api/admin/roles");
+}
+
+export async function saveRoleDefinition(role) {
+  return apiPost("/api/admin/roles", role);
+}
+
+export async function deleteRoleDefinition(id) {
+  return apiDelete(`/api/admin/roles/${encodeURIComponent(id)}`);
+}
+
+export async function listServiceAccounts() {
+  return apiGet("/api/admin/service-accounts");
+}
+
+export async function createServiceAccount(account) {
+  return apiPost("/api/admin/service-accounts", account);
+}
+
+export async function rotateServiceAccount(id) {
+  return apiPost(`/api/admin/service-accounts/${encodeURIComponent(id)}/rotate`, {});
+}
+
+export async function revokeServiceAccount(id) {
+  return apiDelete(`/api/admin/service-accounts/${encodeURIComponent(id)}`);
 }
 
 export async function ingestS3(config) {
@@ -171,26 +494,60 @@ export async function listBackendRuns() {
 }
 
 export async function exportAuditNdjson() {
-  const response = await fetch("/api/audit/export", { headers: authHeaders() });
+  const response = await fetch("/api/audit/export", { headers: authHeaders(), credentials: "same-origin" });
   if (!response.ok) throw new Error(await errorText(response));
   return response.text();
 }
 
-export function saveApiKey(key) {
-  if (key) localStorage.setItem("ndrFlowConsole.apiKey", key);
-  else localStorage.removeItem("ndrFlowConsole.apiKey");
+export async function listAuditEvents({ limit = 100, action = "", actor = "" } = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (action) params.set("action", action);
+  if (actor) params.set("actor", actor);
+  return apiGet(`/api/audit/events?${params.toString()}`);
+}
+
+export async function saveApiKey(key) {
+  const value = String(key || "").trim();
+  if (!value) {
+    await clearCredentials();
+    return null;
+  }
+  const response = await fetch("/api/auth/api-key-session", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ apiKey: value })
+  });
+  if (!response.ok) throw new Error(await errorText(response));
+  const session = await response.json();
+  saveSessionMetadata(session);
+  return session;
 }
 
 export function getApiKey() {
-  return localStorage.getItem("ndrFlowConsole.apiKey") || "";
+  return "";
 }
 
-export function clearCredentials() {
+export function storageSessionBinding() {
+  const csrf = sessionStorage.getItem("ndrFlowConsole.csrf") || "";
+  const expiresAt = sessionStorage.getItem("ndrFlowConsole.sessionExpiresAt") || "";
+  return csrf && expiresAt ? `${csrf}.${expiresAt}` : "";
+}
+
+export async function clearCredentials() {
+  await fetch("/api/auth/logout", { method: "POST", headers: authHeaders(), credentials: "same-origin" }).catch(() => {});
   localStorage.removeItem("ndrFlowConsole.apiKey");
   localStorage.removeItem("ndrFlowConsole.oidcToken");
   localStorage.removeItem("ndrFlowConsole.oidcExpiresAt");
   localStorage.removeItem("ndrFlowConsole.oidcState");
   localStorage.removeItem("ndrFlowConsole.oidcVerifier");
+  sessionStorage.removeItem("ndrFlowConsole.csrf");
+  sessionStorage.removeItem("ndrFlowConsole.sessionExpiresAt");
+  sessionStorage.removeItem("ndrFlowConsole.oidcToken");
+  sessionStorage.removeItem("ndrFlowConsole.oidcExpiresAt");
+  sessionStorage.removeItem("ndrFlowConsole.oidcState");
+  sessionStorage.removeItem("ndrFlowConsole.oidcVerifier");
 }
 
 export async function beginSsoLogin(config) {
@@ -201,8 +558,8 @@ export async function beginSsoLogin(config) {
   const state = randomString();
   const verifier = randomString(64);
   const challenge = await pkceChallenge(verifier);
-  localStorage.setItem("ndrFlowConsole.oidcState", state);
-  localStorage.setItem("ndrFlowConsole.oidcVerifier", verifier);
+  sessionStorage.setItem("ndrFlowConsole.oidcState", state);
+  sessionStorage.setItem("ndrFlowConsole.oidcVerifier", verifier);
   const params = new URLSearchParams({
     response_type: "code",
     client_id: config.clientId,
@@ -220,8 +577,8 @@ export async function completeSsoCallback() {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   if (!code) return null;
-  const expectedState = localStorage.getItem("ndrFlowConsole.oidcState");
-  const verifier = localStorage.getItem("ndrFlowConsole.oidcVerifier");
+  const expectedState = sessionStorage.getItem("ndrFlowConsole.oidcState") || localStorage.getItem("ndrFlowConsole.oidcState");
+  const verifier = sessionStorage.getItem("ndrFlowConsole.oidcVerifier") || localStorage.getItem("ndrFlowConsole.oidcVerifier");
   if (!state || state !== expectedState || !verifier) {
     throw new Error("SSO callback validation failed.");
   }
@@ -229,25 +586,27 @@ export async function completeSsoCallback() {
   const response = await fetch("/api/auth/token", {
     method: "POST",
     headers: { "content-type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({ code, codeVerifier: verifier, redirectUri })
   });
   if (!response.ok) throw new Error(await errorText(response));
-  const token = await response.json();
-  const bearer = token.idToken || token.accessToken;
-  if (!bearer) throw new Error("SSO provider did not return a usable token.");
-  localStorage.setItem("ndrFlowConsole.oidcToken", bearer);
-  localStorage.setItem("ndrFlowConsole.oidcExpiresAt", String(Date.now() + Number(token.expiresIn || 3600) * 1000));
+  const session = await response.json();
+  saveSessionMetadata(session);
+  localStorage.removeItem("ndrFlowConsole.oidcToken");
+  localStorage.removeItem("ndrFlowConsole.oidcExpiresAt");
+  sessionStorage.removeItem("ndrFlowConsole.oidcState");
+  sessionStorage.removeItem("ndrFlowConsole.oidcVerifier");
   localStorage.removeItem("ndrFlowConsole.oidcState");
   localStorage.removeItem("ndrFlowConsole.oidcVerifier");
   url.searchParams.delete("code");
   url.searchParams.delete("state");
   url.searchParams.delete("session_state");
   window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
-  return token;
+  return session;
 }
 
 async function apiGet(path) {
-  const response = await fetch(path, { headers: authHeaders() });
+  const response = await fetch(path, { headers: authHeaders(), credentials: "same-origin" });
   if (!response.ok) throw new Error(await errorText(response));
   return response.json();
 }
@@ -256,6 +615,7 @@ async function apiPost(path, body) {
   const response = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeaders() },
+    credentials: "same-origin",
     body: JSON.stringify(body)
   });
   if (!response.ok) throw new Error(await errorText(response));
@@ -263,19 +623,25 @@ async function apiPost(path, body) {
 }
 
 async function apiDelete(path) {
-  const response = await fetch(path, { method: "DELETE", headers: authHeaders() });
+  const response = await fetch(path, { method: "DELETE", headers: authHeaders(), credentials: "same-origin" });
   if (!response.ok) throw new Error(await errorText(response));
   return response.json();
 }
 
 function authHeaders() {
-  const oidcToken = localStorage.getItem("ndrFlowConsole.oidcToken");
-  const expiresAt = Number(localStorage.getItem("ndrFlowConsole.oidcExpiresAt") || 0);
-  if (oidcToken && (!expiresAt || Date.now() < expiresAt)) {
-    return { authorization: `Bearer ${oidcToken}` };
-  }
-  const key = localStorage.getItem("ndrFlowConsole.apiKey");
-  return key ? { "x-ndr-api-key": key } : {};
+  const csrf = sessionStorage.getItem("ndrFlowConsole.csrf");
+  return csrf ? { "x-ndr-csrf": csrf } : {};
+}
+
+async function browserSha256(file) {
+  const bytes = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function saveSessionMetadata(session) {
+  if (session?.csrf) sessionStorage.setItem("ndrFlowConsole.csrf", session.csrf);
+  if (session?.expiresAt) sessionStorage.setItem("ndrFlowConsole.sessionExpiresAt", session.expiresAt);
 }
 
 function randomString(bytes = 32) {

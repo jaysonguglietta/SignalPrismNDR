@@ -20,6 +20,7 @@ const {
   buildReplayTimeline,
   buildSourceHealth,
   buildTopologyReplaySnapshot,
+  csvValue,
   parseVpcFlowLog,
   parseThreatIntel,
   scoreDetectionRuleQuality,
@@ -52,8 +53,25 @@ assertIncludes(html, 'id="analyzePolicyButton"', "policy exposure workflow shoul
 assertIncludes(html, 'id="createPlaybookRunButton"', "response playbook workflow should exist");
 assertIncludes(html, 'id="createEvidenceVaultButton"', "evidence vault workflow should exist");
 assertIncludes(html, 'id="generateEnterpriseReportButton"', "enterprise reporting workflow should exist");
+assertIncludes(html, 'id="ingestTelemetryButton"', "enterprise telemetry ingest should exist");
+assertIncludes(html, 'id="correlateTelemetryButton"', "cross-source correlation should exist");
+assertIncludes(html, 'id="requestResponseActionButton"', "governed response request should exist");
+assertIncludes(html, 'id="verifyDetectionContentButton"', "signed detection content verification should exist");
+assertIncludes(html, 'id="platformTab"', "enterprise platform workspace should exist");
+assertIncludes(html, 'id="runBehaviorButton"', "behavior analytics workflow should exist");
+assertIncludes(html, 'id="buildCampaignsButton"', "campaign assembly workflow should exist");
+assertIncludes(html, 'id="runRetrospectiveHuntButton"', "retrospective hunt workflow should exist");
+assertIncludes(html, 'id="runAiInvestigationButton"', "AI investigation agent workflow should exist");
+assertIncludes(html, 'id="publishOcsfButton"', "continuous OCSF publishing workflow should exist");
+assertIncludes(html, 'id="saveConnectorButton"', "governed connector workflow should exist");
+assertIncludes(html, 'id="discoverOrganizationButton"', "AWS Organizations discovery workflow should exist");
+assertIncludes(html, 'id="directEvidenceUploadButton"', "direct immutable evidence upload should exist");
+assertIncludes(html, 'id="saveCustomRoleButton"', "custom tenant role workflow should exist");
+assertIncludes(html, 'id="createServiceAccountButton"', "service account workflow should exist");
 
 const parsed = parseVpcFlowLog(SAMPLE_LOG);
+assert.equal(csvValue("=HYPERLINK(\"https://attacker.example\")"), "\"'=HYPERLINK(\"\"https://attacker.example\"\")\"", "CSV exports must neutralize spreadsheet formulas");
+assert.equal(csvValue("  +cmd|' /C calc'!A0"), "'  +cmd|' /C calc'!A0", "CSV exports must neutralize formulas after leading whitespace");
 const analysis = analyzeRecords(parsed.records, parsed.errors);
 assert.equal(parsed.records.length, 11, "upload/analyze flow should parse the demo evidence");
 assert.ok(analysis.detections.length > 0, "demo flow should produce detections");
@@ -126,8 +144,9 @@ assert.ok(replayTimeline.some((event) => event.type === "detection"), "timeline 
 const playbookSteps = buildPlaybookSteps("contain-public-admin", { title: "Case", assignee: "Analyst" });
 assert.ok(playbookSteps.length >= 3, "playbooks should create actionable response steps");
 
-const vaultManifest = buildEvidenceVaultManifest({ records: parsed.records, analysis, cases: [], settings: { governance: { evidenceRetentionDays: 30 } }, source: "unit" });
+const vaultManifest = await buildEvidenceVaultManifest({ records: parsed.records, analysis, cases: [], settings: { governance: { evidenceRetentionDays: 30 } }, source: "unit" });
 assert.ok(vaultManifest.evidenceHash, "vault manifest should include chain-of-custody hash");
+assert.equal(vaultManifest.evidenceHashAlgorithm, "SHA-256", "vault manifest should use a cryptographic evidence hash");
 
 const sourceHealth = buildSourceHealth([{ id: "source-1", name: "Prod", scope: ["eni-0a1b2c3d"] }], [], parsed.records, []);
 assert.equal(sourceHealth[0].title, "Prod", "source health should evaluate managed sources");

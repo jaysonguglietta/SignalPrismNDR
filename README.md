@@ -1,6 +1,10 @@
 # SignalPrism NDR
 
-SignalPrism NDR is a local and cloud-ready Network Detection and Response console for uploading or ingesting AWS VPC Flow Logs and reviewing traffic volume, rejected flows, top ports, detections, entity risk, internal paths, external paths, and filtered evidence records.
+SignalPrism NDR is a local and cloud-ready Network Detection and Response console for uploading or continuously ingesting cloud network evidence, correlating identity/DNS/threat/sensor telemetry, investigating entity paths, and governing containment actions. It supports AWS VPC Flow Logs plus CloudTrail, Route 53 resolver DNS, GuardDuty, Zeek JSON, and Suricata EVE JSON.
+
+The detection-operations command center prioritizes attacks by breadth, velocity, privilege, impact, confidence, and blast radius; monitors source and sensor health; resolves time-aware entity relationships; governs seasonal behavior models; analyzes encrypted-traffic metadata; and forecasts telemetry cost. Native exports use OCSF 1.8, while Amazon Security Lake delivery uses a separate OCSF 1.3 compatibility profile with one event class per source, time ordering, five-minute delivery, assigned prefixes, provider identity, and Zstandard Parquet.
+
+An in-product `Learn` workspace explains NDR concepts, analytical boundaries, urgency scoring, each operational screen, a practical signal-investigation playbook, and core terminology. It links learners directly into the live workflows and can load the guided demo for hands-on practice.
 
 ## Documentation
 
@@ -17,6 +21,9 @@ SignalPrism NDR is a local and cloud-ready Network Detection and Response consol
 - [Developer Guide](docs/DEVELOPER_GUIDE.md)
 - [Demo Script](docs/DEMO_SCRIPT.md)
 - [Security Notes](SECURITY.md)
+- [Security Hardening](docs/SECURITY_HARDENING.md)
+- [Security Remediation Record](docs/SECURITY_REMEDIATION_2026-07-17.md)
+- [Threat Model](docs/THREAT_MODEL.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 
@@ -30,7 +37,7 @@ Run the backend-enabled version with:
 npm start
 ```
 
-Then open `http://localhost:4173`.
+Then open `http://localhost:4173`. With no `NDR_API_KEY` or OIDC issuer configured, backend admin APIs are available only to loopback requests; shared or containerized deployments should set an API key or OIDC.
 
 Cloud ingest uses environment credentials:
 
@@ -42,7 +49,9 @@ The backend stores tenant workspaces, cases, evidence-run metadata, managed sour
 
 Full raw evidence packages are written to local object-package storage under `.ndr-data/evidence-packages/` by default. Set `NDR_EVIDENCE_BUCKET` to write packages to S3 with Object Lock retention headers controlled by `NDR_EVIDENCE_RETENTION_DAYS` and `NDR_EVIDENCE_OBJECT_LOCK_MODE`.
 
-For shared environments, set `NDR_API_KEY` and configure clients to send `x-ndr-api-key`, or configure OIDC/SSO with `NDR_OIDC_ISSUER`, `NDR_OIDC_CLIENT_ID`, `NDR_OIDC_AUDIENCE`, `NDR_TENANT_CLAIM`, and the role group mappings. The backend supports tenant-aware `admin`, `analyst`, and `viewer` roles.
+For shared environments, set `NDR_API_KEY` or configure OIDC/SSO with `NDR_OIDC_ISSUER`, `NDR_OIDC_CLIENT_ID`, `NDR_OIDC_AUDIENCE`, `NDR_TENANT_CLAIM`, and the role group mappings. Browser sign-in uses an opaque, HMAC-protected HttpOnly SameSite session identifier plus CSRF token; principal and revocation state remain server-side. API clients can still send `x-ndr-api-key` directly. OIDC deployments require exact discovery issuer, audience, and tenant-claim validation by default.
+
+Direct S3/CloudWatch ingest is disabled by default for tenant safety. Create managed sources first, then ingest or schedule jobs from those sources. Set `NDR_ALLOW_DIRECT_INGEST=true` only in trusted single-tenant development environments.
 
 Enable AWS Bedrock AI assistance with:
 
@@ -53,17 +62,18 @@ NDR_BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0 \
 npm start
 ```
 
-The AI assistant uses the backend role checks, signs Bedrock Runtime requests server-side, sends a bounded investigation context, and is disabled by default.
+The AI assistant uses backend role checks, signs Bedrock Runtime requests server-side, sends a bounded and sanitized investigation context, treats evidence as untrusted data, and is disabled by default.
 
 Backend operational endpoints:
 
 - `GET /api/health`
-- `GET /api/ready`
-- `GET /api/metrics`
+- `GET /api/ready` (admin)
+- `GET /api/metrics` (admin)
 - `GET /api/auth/config`
 - `GET /api/auth/me`
 - `GET /api/ai/config`
 - `POST /api/ai/ask`
+- `GET /api/audit/events`
 - `GET /api/audit/export`
 
 Run smoke checks with:
@@ -78,6 +88,13 @@ Run backend integration checks with:
 npm run integration
 ```
 
+Run the enterprise telemetry/queue contracts and deployment posture checks with:
+
+```bash
+npm run enterprise:test
+npm run readiness:check
+```
+
 Run automated UI workflow checks with:
 
 ```bash
@@ -87,10 +104,12 @@ npm run ui:test
 Optional visual regression specs are available for Playwright/browser-driver runs:
 
 ```bash
+npm ci
+npx playwright install chromium webkit
 npm run visual:test
 ```
 
-Install `@playwright/test` and browser binaries before using the visual scripts.
+The locked Playwright dependency, functional browser flows, and portable desktop/mobile visual baselines are included in the repository.
 
 Build the dependency-free distributable with:
 
@@ -119,9 +138,10 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 8. Run advanced hunts with fielded queries and save reusable hunts.
 9. Track managed sources, coverage, ingest history, async job status, and saved baselines, then ingest or schedule CloudWatch/S3 imports directly from source inventory.
 10. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
-11. Manage tenant users, roles, and source ownership from the Admin screen.
-12. Use the Enterprise workspace for cited answers, threat intel, detection-as-code, playbooks, vault bundles, reports, and governance readiness.
+11. Manage tenant users, roles, source ownership, access-review exports, and audit-review evidence from the Admin screen.
+12. Use the Enterprise workspace for cited answers, detection operations, production hardening, threat intel, detection-as-code, playbooks, vault bundles, reports, and governance readiness.
 13. Simulate traffic reduction policies and export detections, records, and full investigation packages.
+14. Submit controlled investigation or Security Lake exports for tenant-admin approval, then consume the time-limited approval once. Security Lake approvals are bound to the OCSF payload SHA-256.
 
 ## Supported input
 
@@ -173,19 +193,30 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - Append-only audit export with retention metadata and Terraform Object Lock retention.
 - Feature-flagged AWS Bedrock assistant for natural-language investigation questions and AI-generated summaries.
 - Bedrock prompt presets for top risk, executive summary, attack path, containment, evidence gaps, and SIEM query ideas.
-- IndexedDB evidence and case fallback when the backend is offline.
+- Opt-in, AES-GCM-sealed IndexedDB evidence caching scoped to the authenticated tenant, principal, and browser session; case fallback remains scoped local data.
 - Tenant-backed investigation workspaces with guided demo mode.
 - Case queue with status, severity override, assignee, notes, and audit log.
 - Detection explainability, confidence interpretation, and tunable rule profiles.
 - Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, prefixes, direct ingest, and schedule creation.
 - Tenant admin screen for users, roles, and managed source ownership.
-- Enterprise command center for readiness scoring, source discovery, detection rule lifecycle, asset context, policy exposure review, quality metrics, and governance controls.
+- Enterprise command center for readiness scoring, detection operations dashboards, production hardening review, source discovery, detection rule lifecycle, asset context, policy exposure review, quality metrics, and governance controls.
 - Evidence-cited investigator copilot, source-health drift checks, threat-intelligence enrichment, and explainable entity risk scoring.
+- Seasonal peer-group behavior models with drift state, model approval guardrails, and rollback snapshots.
+- Source and sensor command center, Kinesis replay controls, hot/cold hunt jobs, temporal entity graph, Community ID, TLS/QUIC metadata analytics, and protocol findings.
+- Smart PCAP manifests with immutable hashes and separately approved, expiring access grants.
+- Threat-intelligence feed lifecycle with automatic historical retromatching and sightings.
+- Response-policy modes, case requirement, independent approval, verification windows, rollback enforcement, and tenant/deployment kill switches.
+- Case tasks, watchers, due dates, SLA breach posture, notification policy resources, regional cells, provider workspaces, data-residency/BYOK posture, and governed agent evaluations.
 - Detection-as-code bundle export with rule quality scoring, draft/test/production promotion, cloning, approval metadata, and rollback-ready versions.
-- Response playbook runs, evidence vault bundle manifests, stakeholder report modes, tenant admin readiness, and replay timeline exports.
+- Response playbook runs, evidence vault bundle manifests, stakeholder report modes, tenant admin readiness, access review, audit review, and replay timeline exports.
 - Security Lake/SIEM OCSF NDJSON export with backend audit manifest support.
 - Full raw evidence packages in local package storage or S3 Object Lock storage with retention metadata.
 - Async CloudWatch/S3 import runs with polling status and completion/failure notifications.
+- Durable SQS ingestion with separate API/worker roles, autoscaled Fargate workers, retries, queue-age monitoring, and a dead-letter queue.
+- CloudTrail, Route 53 DNS, GuardDuty, Zeek, and Suricata normalization with explainable cross-source correlation and ATT&CK mappings.
+- Two-person response action workflow with EventBridge-only execution, retained event archive, idempotency keys, and no analyst-controlled webhooks.
+- Ed25519-signed detection content verification, admin-only import to test status, and preserved independent production promotion.
+- Server-backed enterprise readiness score covering identity, storage, queueing, retention, source ownership, response, and detection governance.
 - RBAC-controlled portable investigation package export.
 - Visual topology map with playable time replay, scrubbing, step controls, and recent-event trail.
 - Automated UI flow tests for upload/demo analysis, rule tuning, AI context, investigation export, and topology replay.
@@ -215,3 +246,24 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - `AssetContext`: owner, environment, criticality, account, role, IP, ENI, and instance metadata.
 - `PolicyFinding`: public exposure, sensitive access, and high-volume egress review finding.
 - `AuditRecord`: append-only actor, role, action, details, creation time, and retention deadline.
+- `ExportApproval`: tenant, export kind, payload hash, requester, separate approver, expiration, one-time consumption state, and approved payload.
+- `Session`: server-side tenant-scoped principal, CSRF, revocation, and TTL record referenced by an opaque signed browser session ID.
+- `TelemetryEvent`: bounded common schema for cloud identity, DNS, threat findings, Zeek, Suricata, and generic sensor events.
+- `CorrelationFinding`: explainable cross-source rule result with score, entity, ATT&CK mapping, source formats, and evidence IDs.
+- `ResponseAction`: tenant action request with target, case/correlation links, separate approver, execution status, and EventBridge event ID.
+- `DetectionContentBundle`: verified publisher/version metadata, Ed25519 algorithm, rules digest, import actor, and rule count.
+- `BehaviorProfile` / `BehaviorFinding`: learned peers, services, hours, volume, risk, explainable deviations, and evidence IDs.
+- `Campaign`: linked stages, entities, signals, evidence, confidence, source formats, and blast radius.
+- `HuntRun`: safe normalized query, scanned/matched counts, facets, and bounded event results.
+- `Connector`: governed catalog type, direction, format, endpoint, Secrets Manager reference, and adapter test status.
+- `EvidenceUpload`: presigned immutable upload session, SHA-256, size, object URI, retention, expiry, and completion state.
+- `RoleDefinition` / `ServiceAccount`: custom tenant permission set and expiring non-human identity with digest-only token storage.
+- `AiAgentRun`: bounded objective, deterministic steps, optional Bedrock synthesis, signal/campaign links, evidence citations, and feedback.
+
+## Production security profile
+
+Set `NDR_PRODUCTION_HARDENING=true` only with HTTPS, a dedicated 32+ character session secret, a separate 32+ character evidence-attestation secret, OIDC authentication, secure cookies, DynamoDB, SQS, and immutable S3 audit/evidence storage. The Terraform module enforces HTTPS, a digest-pinned image, and a trusted detection-content public key for production; it also provisions WAF, ALB logs, EFS backups, DynamoDB TTL/PITR, separate API/workers, SQS/DLQ, EventBridge archive, task hardening, alarms, and Object Lock buckets.
+
+See [Security Hardening](docs/SECURITY_HARDENING.md) for the control matrix, threat model, production gate, and residual risks.
+
+See [Enterprise Platform](docs/ENTERPRISE_PLATFORM.md) for advanced analytics, the Platform workspace, OCSF/Parquet data plane, Organizations onboarding, connector boundary, SCIM/service-account model, and production rollout.

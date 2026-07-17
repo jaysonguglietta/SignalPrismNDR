@@ -3,10 +3,17 @@ import { join } from "node:path";
 
 const dist = "dist";
 await mkdir(dist, { recursive: true });
-for (const file of ["index.html", "styles.css", "app.js", "server.mjs", "package.json"]) {
+await mkdir(join(dist, "public", "src"), { recursive: true });
+for (const file of ["server.mjs", "package.json"]) {
   await copyFile(file, join(dist, file));
 }
+for (const file of ["index.html", "styles.css", "app.js", "favicon.svg"]) {
+  await copyFile(file, join(dist, "public", file));
+}
 await copyDir("src", join(dist, "src"));
+for (const file of ["idb-store.js", "backend-client.js", "topology.js", "platform-ui.mjs", "operations-ui.mjs"]) {
+  await copyFile(join("src", file), join(dist, "public", "src", file));
+}
 console.log("Build complete: dist/");
 
 async function copyDir(from, to) {

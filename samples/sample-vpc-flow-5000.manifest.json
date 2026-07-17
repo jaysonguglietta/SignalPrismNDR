@@ -1,0 +1,81 @@
+{
+  "product": "SignalPrism NDR",
+  "format": "AWS VPC Flow Logs custom 14-field text",
+  "generatedAt": "2026-07-16T15:09:57.478Z",
+  "deterministicSeed": "0x051a1f10",
+  "timeRange": {
+    "start": "2026-07-15T00:00:06.000Z",
+    "end": "2026-07-16T00:00:46.000Z"
+  },
+  "entryCount": 5000,
+  "classificationCounts": {
+    "normal": 4500,
+    "malicious": 500
+  },
+  "scenarioCounts": {
+    "normal-web-egress": 1800,
+    "normal-internal-application": 1100,
+    "normal-dns-ntp": 700,
+    "normal-aws-services": 500,
+    "normal-background-rejects": 400,
+    "malicious-port-scan": 150,
+    "malicious-ssh-bruteforce": 100,
+    "malicious-rdp-bruteforce": 50,
+    "malicious-lateral-movement": 70,
+    "malicious-beaconing": 80,
+    "malicious-dns-tunneling": 25,
+    "malicious-exfiltration": 25
+  },
+  "scenarios": {
+    "normal-web-egress": {
+      "classification": "normal",
+      "description": "Workload HTTPS and HTTP egress to common public services."
+    },
+    "normal-internal-application": {
+      "classification": "normal",
+      "description": "Expected application-tier and service-to-service traffic."
+    },
+    "normal-dns-ntp": {
+      "classification": "normal",
+      "description": "Routine DNS and NTP traffic."
+    },
+    "normal-aws-services": {
+      "classification": "normal",
+      "description": "HTTPS access to representative AWS service endpoints."
+    },
+    "normal-background-rejects": {
+      "classification": "normal",
+      "description": "Low-rate internet background noise rejected by controls."
+    },
+    "malicious-port-scan": {
+      "classification": "malicious",
+      "description": "External reconnaissance across sensitive service ports."
+    },
+    "malicious-ssh-bruteforce": {
+      "classification": "malicious",
+      "description": "Repeated rejected SSH attempts against a bastion target."
+    },
+    "malicious-rdp-bruteforce": {
+      "classification": "malicious",
+      "description": "Repeated rejected RDP attempts against a Windows target."
+    },
+    "malicious-lateral-movement": {
+      "classification": "malicious",
+      "description": "Accepted internal access to administrative and database services."
+    },
+    "malicious-beaconing": {
+      "classification": "malicious",
+      "description": "Regular outbound callbacks to a fixed command-and-control endpoint."
+    },
+    "malicious-dns-tunneling": {
+      "classification": "malicious",
+      "description": "High-volume DNS traffic to an external resolver."
+    },
+    "malicious-exfiltration": {
+      "classification": "malicious",
+      "description": "Large accepted transfers from a database-tier workload to an external endpoint."
+    }
+  },
+  "sha256": "ec8cf3b4691f4c1511fae5a8b9bcc75e1b8128c859aac5765372dcab4dadb8a3",
+  "file": "sample-vpc-flow-5000.log"
+}

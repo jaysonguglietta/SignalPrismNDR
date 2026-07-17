@@ -4,7 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SignalPrism NDR</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="favicon.svg?v=0.3.0" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css?v=0.3.0">
   </head>
   <body>
     <main class="app-shell">
@@ -115,10 +116,110 @@
             <button class="tab" id="adminTab" type="button" role="tab" aria-selected="false" aria-controls="adminPanel" data-tab="admin">Admin</button>
             <button class="tab" id="topologyTab" type="button" role="tab" aria-selected="false" aria-controls="topologyPanel" data-tab="topology">Topology</button>
             <button class="tab" id="enterpriseTab" type="button" role="tab" aria-selected="false" aria-controls="enterprisePanel" data-tab="enterprise">Enterprise</button>
+            <button class="tab" id="platformTab" type="button" role="tab" aria-selected="false" aria-controls="platformPanel" data-tab="platform">Platform</button>
             <button class="tab" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsPanel" data-tab="reports">Reports</button>
+            <button class="tab" id="learnTab" type="button" role="tab" aria-selected="false" aria-controls="learnPanel" data-tab="learn">Learn</button>
           </nav>
 
           <section class="tab-panel active" id="overviewPanel" role="tabpanel" aria-labelledby="overviewTab">
+            <div class="operations-commandbar" aria-label="Detection operations controls">
+              <div class="operations-title">
+                <span class="live-indicator" id="operationsLiveIndicator" aria-hidden="true"></span>
+                <div>
+                  <p class="panel-kicker">Detection operations</p>
+                  <h2>Security operations command center</h2>
+                </div>
+              </div>
+              <div class="operations-context" aria-label="Operational context">
+                <span id="operationsTenantLabel">Current tenant</span>
+                <span id="operationsRegionLabel">Single region</span>
+                <span id="operationsUpdatedLabel">Awaiting telemetry</span>
+              </div>
+              <div class="operations-actions">
+                <label class="sr-only" for="operationsSchemaProfile">OCSF profile</label>
+                <select class="compact-select" id="operationsSchemaProfile">
+                  <option value="native-current">Native OCSF 1.8</option>
+                  <option value="security-lake-1.3">Security Lake OCSF 1.3</option>
+                </select>
+                <button class="ghost-button compact" id="validateOperationsSchemaButton" type="button">Validate schema</button>
+                <button class="primary-button compact" id="runOperationsAnalysisButton" type="button">Run analysis</button>
+                <button class="icon-button" id="refreshOperationsButton" type="button" aria-label="Refresh detection operations" title="Refresh detection operations">&#8635;</button>
+              </div>
+            </div>
+
+            <div class="operations-status" id="operationsStatus" role="status" aria-live="polite">Loading operational posture...</div>
+            <div class="operations-kpi-grid" id="operationsKpis" aria-label="Detection operations metrics"></div>
+
+            <div class="operations-grid">
+              <article class="panel operations-queue-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Attack urgency</p>
+                    <h2>Priority investigation queue</h2>
+                  </div>
+                  <span class="panel-note" id="operationsQueueCount">0 signals</span>
+                </div>
+                <div class="operations-queue" id="operationsUrgencyQueue"></div>
+              </article>
+
+              <article class="panel operations-health-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Data plane</p>
+                    <h2>Source and sensor health</h2>
+                  </div>
+                  <span class="panel-note" id="operationsStreamMode">Local</span>
+                </div>
+                <div class="operations-health-list" id="operationsSourceHealth"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Exposure graph</p>
+                    <h2>Observed attack paths</h2>
+                  </div>
+                </div>
+                <div class="operations-path-list" id="operationsExposurePaths"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Behavior governance</p>
+                    <h2>Seasonal model health</h2>
+                  </div>
+                </div>
+                <div class="operations-model-summary" id="operationsModelHealth"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Encrypted traffic</p>
+                    <h2>TLS, QUIC and fingerprints</h2>
+                  </div>
+                </div>
+                <div class="operations-model-summary" id="operationsEncryptedTraffic"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Data economics</p>
+                    <h2>Telemetry cost and quality</h2>
+                  </div>
+                </div>
+                <div class="operations-model-summary" id="operationsDataEconomics"></div>
+              </article>
+            </div>
+
+            <div class="section-divider">
+              <div>
+                <p class="panel-kicker">Flow telemetry</p>
+                <h2>Network activity detail</h2>
+              </div>
+            </div>
             <div class="metric-grid" id="metricGrid"></div>
 
             <div class="analysis-grid">
@@ -466,10 +567,10 @@
                   </div>
                   <div class="auth-key-field">
                     <label class="field-label" for="apiKeyInput">API key</label>
-                    <input id="apiKeyInput" type="password" autocomplete="off" placeholder="x-ndr-api-key">
+                    <input id="apiKeyInput" type="password" autocomplete="off" placeholder="Start secure session">
                   </div>
                   <div class="auth-actions">
-                    <button class="ghost-button compact" id="saveApiKeyButton" type="button">Save Key</button>
+                    <button class="ghost-button compact" id="saveApiKeyButton" type="button">Start Session</button>
                     <button class="ghost-button compact" id="ssoLoginButton" type="button">SSO Login</button>
                     <button class="ghost-button compact" id="ssoLogoutButton" type="button">Sign Out</button>
                   </div>
@@ -567,9 +668,10 @@
                   <label class="field-label" for="caseStatusInput">Status</label>
                   <select id="caseStatusInput">
                     <option value="New">New</option>
-                    <option value="Triage">Triage</option>
+                    <option value="Triaged">Triaged</option>
                     <option value="Investigating">Investigating</option>
                     <option value="Contained">Contained</option>
+                    <option value="Monitoring">Monitoring</option>
                     <option value="Closed">Closed</option>
                   </select>
                   <label class="field-label" for="caseSeverityInput">Severity</label>
@@ -592,6 +694,23 @@
                   <span class="severity-count" id="caseCountLabel">0</span>
                 </div>
                 <div class="entity-list" id="caseList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div><p class="panel-kicker">Collaboration and SLA</p><h2>Case tasks, watchers, and escalation</h2></div>
+                  <button class="primary-button compact" id="saveCaseTaskButton" type="button">Add task</button>
+                </div>
+                <div class="tool-body advanced-control-grid">
+                  <div class="platform-form">
+                    <label class="field-label" for="caseTaskCaseInput">Case</label><select id="caseTaskCaseInput"><option value="">No cases available</option></select>
+                    <label class="field-label" for="caseTaskTitleInput">Task</label><input id="caseTaskTitleInput" type="text" placeholder="Validate affected identity sessions">
+                    <label class="field-label" for="caseTaskAssigneeInput">Assignee</label><input id="caseTaskAssigneeInput" type="text" placeholder="Tier 2 analyst">
+                    <label class="field-label" for="caseTaskDueInput">Due</label><input id="caseTaskDueInput" type="datetime-local">
+                    <label class="field-label" for="caseTaskWatchersInput">Watchers</label><input id="caseTaskWatchersInput" type="text" placeholder="soc-lead@example.com, ir@example.com">
+                  </div>
+                  <div class="quality-list bounded-list" id="caseTaskList"></div>
+                </div>
               </article>
 
               <article class="panel wide">
@@ -647,6 +766,7 @@
                   </div>
                   <span class="severity-count" id="adminUserCountLabel">0</span>
                 </div>
+                <div class="metric-grid compact-metrics" id="adminOpsGrid"></div>
                 <div class="entity-list" id="adminUserList"></div>
               </article>
 
@@ -669,6 +789,52 @@
                   </div>
                 </div>
                 <div class="quality-list" id="sourceOwnershipList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Access review</p>
+                    <h2>RBAC and source accountability</h2>
+                  </div>
+                  <button class="ghost-button compact" id="exportAccessReviewButton" type="button">Export</button>
+                </div>
+                <div class="quality-list" id="accessReviewList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Export governance</p>
+                    <h2>Evidence release approvals</h2>
+                  </div>
+                  <button class="ghost-button compact" id="refreshExportApprovalsButton" type="button">Refresh</button>
+                </div>
+                <div class="quality-list" id="exportApprovalList" aria-live="polite"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Audit review</p>
+                    <h2>Tenant activity log</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="refreshAuditButton" type="button">Refresh</button>
+                    <button class="ghost-button compact" id="exportAuditButton" type="button">Export NDJSON</button>
+                  </div>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <label class="field-label" for="auditActionFilterInput">Action filter</label>
+                    <input id="auditActionFilterInput" type="search" placeholder="case, ingest, auth, export">
+                  </div>
+                  <div>
+                    <label class="field-label" for="auditActorFilterInput">Actor filter</label>
+                    <input id="auditActorFilterInput" type="search" placeholder="analyst@example.com">
+                  </div>
+                </div>
+                <div class="quality-list" id="auditReviewList"></div>
               </article>
             </div>
           </section>
@@ -712,6 +878,137 @@
                   <span class="panel-note" id="enterpriseReadinessLabel">No evidence loaded</span>
                 </div>
                 <div class="metric-grid compact-metrics" id="enterpriseMetricGrid"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Detection operations</p>
+                    <h2>Rule health, coverage, and response load</h2>
+                  </div>
+                  <span class="panel-note" id="detectionOpsLabel">No test run yet</span>
+                </div>
+                <div class="metric-grid compact-metrics" id="detectionOpsGrid"></div>
+                <div class="quality-list" id="detectionOpsList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Production hardening</p>
+                    <h2>Deployment posture checklist</h2>
+                  </div>
+                  <button class="ghost-button compact" id="refreshHardeningButton" type="button">Refresh</button>
+                </div>
+                <div class="quality-list" id="productionHardeningList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Signal fusion</p>
+                    <h2>Cloud, identity, DNS, and sensor correlation</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="loadTelemetrySampleButton" type="button">Load Sample</button>
+                    <button class="ghost-button compact" id="correlateTelemetryButton" type="button">Correlate</button>
+                  </div>
+                </div>
+                <div class="tool-body signal-fusion-grid">
+                  <div>
+                    <label class="field-label" for="telemetryFormatInput">Telemetry format</label>
+                    <select id="telemetryFormatInput">
+                      <option value="auto">Auto-detect mixed JSON</option>
+                      <option value="cloudtrail">AWS CloudTrail</option>
+                      <option value="route53-dns">Route 53 resolver DNS</option>
+                      <option value="guardduty">Amazon GuardDuty</option>
+                      <option value="zeek">Zeek JSON</option>
+                      <option value="suricata">Suricata EVE JSON</option>
+                      <option value="azure-nsg">Azure NSG flow logs</option>
+                      <option value="azure-activity">Azure Activity logs</option>
+                      <option value="entra-audit">Microsoft Entra audit</option>
+                      <option value="gcp-vpc-flow">GCP VPC flow logs</option>
+                      <option value="gcp-audit">GCP audit logs</option>
+                      <option value="kubernetes-audit">Kubernetes audit</option>
+                      <option value="cilium-hubble">Cilium Hubble</option>
+                      <option value="gigamon">Gigamon IPFIX or CEF</option>
+                      <option value="extrahop">ExtraHop RevealX</option>
+                      <option value="generic">Normalized generic JSON</option>
+                    </select>
+                    <label class="field-label" for="telemetryPayloadInput">JSON, JSONL, or event array</label>
+                    <textarea id="telemetryPayloadInput" spellcheck="false" placeholder='[{"timestamp":"2026-07-16T12:00:00Z","src_ip":"10.0.1.12","dest_ip":"198.51.100.8","event_type":"alert"}]'></textarea>
+                    <button class="primary-button compact full-width-button" id="ingestTelemetryButton" type="button">Normalize and Ingest</button>
+                  </div>
+                  <div>
+                    <div class="metric-grid compact-metrics" id="telemetryMetricGrid"></div>
+                    <div class="quality-list bounded-list" id="correlationList" aria-live="polite"></div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Governed response</p>
+                    <h2>Two-person containment and automation</h2>
+                  </div>
+                  <span class="panel-note" id="responseActionStatusLabel">Approval required</span>
+                </div>
+                <div class="tool-body cloud-grid">
+                  <div>
+                    <label class="field-label" for="responseActionTypeInput">Action</label>
+                    <select id="responseActionTypeInput">
+                      <option value="isolate-entity">Isolate entity</option>
+                      <option value="block-ip">Block IP</option>
+                      <option value="disable-access-key">Disable AWS access key</option>
+                      <option value="restrict-security-group">Restrict security group</option>
+                      <option value="quarantine-workload">Quarantine Kubernetes workload</option>
+                      <option value="revoke-session">Revoke identity sessions</option>
+                      <option value="capture-packets">Request packet capture</option>
+                      <option value="create-ticket">Create incident ticket</option>
+                      <option value="notify-soc">Notify SOC</option>
+                    </select>
+                    <label class="field-label" for="responseExecutionModeInput">Execution mode</label>
+                    <select id="responseExecutionModeInput">
+                      <option value="dry-run">Dry run</option>
+                      <option value="enforce">Enforce after approval</option>
+                    </select>
+                    <label class="field-label" for="responseActionTargetInput">Target</label>
+                    <input id="responseActionTargetInput" type="text" placeholder="10.0.1.12 or i-0123456789abcdef0">
+                  </div>
+                  <div>
+                    <label class="field-label" for="responseCaseInput">Case</label>
+                    <select id="responseCaseInput"><option value="">No linked case</option></select>
+                    <label class="field-label" for="responseCorrelationInput">Correlation</label>
+                    <select id="responseCorrelationInput"><option value="">No linked correlation</option></select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="responseActionReasonInput">Reason and rollback context</label>
+                    <textarea id="responseActionReasonInput" class="short-textarea" spellcheck="true" placeholder="Contain the entity while the analyst validates the correlated evidence."></textarea>
+                    <button class="primary-button compact full-width-button" id="requestResponseActionButton" type="button">Request Approval</button>
+                  </div>
+                </div>
+                <div class="quality-list bounded-list" id="responseActionList" aria-live="polite"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Detection supply chain</p>
+                    <h2>Signed content verification and governed import</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="verifyDetectionContentButton" type="button">Verify</button>
+                    <button class="ghost-button compact" id="importDetectionContentButton" type="button">Import to Test</button>
+                  </div>
+                </div>
+                <div class="tool-body signal-fusion-grid">
+                  <div>
+                    <label class="field-label" for="detectionContentInput">Signed bundle JSON</label>
+                    <textarea id="detectionContentInput" spellcheck="false" placeholder='{"manifest":{"id":"signalprism-core","version":"1.0.0","contentHash":"..."},"rules":[],"signature":"..."}'></textarea>
+                  </div>
+                  <div class="quality-list bounded-list" id="detectionContentList" aria-live="polite"></div>
+                </div>
               </article>
 
               <article class="panel wide">
@@ -855,8 +1152,8 @@
                   <div>
                     <label class="field-label" for="securityLakeBucketInput">Security Lake bucket</label>
                     <input id="securityLakeBucketInput" type="text" placeholder="aws-security-data-lake-us-east-1">
-                    <label class="field-label" for="securityLakePrefixInput">Prefix</label>
-                    <input id="securityLakePrefixInput" type="text" placeholder="custom/SignalPrismNDR">
+                    <label class="field-label" for="enterpriseSecurityLakePrefixInput">Prefix</label>
+                    <input id="enterpriseSecurityLakePrefixInput" type="text" placeholder="custom/SignalPrismNDR">
                   </div>
                   <div>
                     <label class="field-label" for="siemTargetInput">SIEM target</label>
@@ -1047,6 +1344,265 @@
             </div>
           </section>
 
+          <section class="tab-panel" id="platformPanel" role="tabpanel" aria-labelledby="platformTab" hidden>
+            <div class="analysis-grid platform-grid">
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Enterprise data plane</p>
+                    <h2>Continuous telemetry and analytics</h2>
+                  </div>
+                  <button class="ghost-button compact" id="platformRefreshButton" type="button">Refresh</button>
+                </div>
+                <div class="metric-grid compact-metrics" id="platformMetricGrid"></div>
+                <div class="platform-action-bar" aria-label="Platform analytics actions">
+                  <button class="primary-button compact" id="runBehaviorButton" type="button">Run Behavior Analytics</button>
+                  <button class="ghost-button compact" id="buildCampaignsButton" type="button">Build Campaigns</button>
+                  <button class="ghost-button compact" id="runPostureButton" type="button">Assess AI and Crypto</button>
+                  <button class="ghost-button compact" id="publishOcsfButton" type="button">Publish OCSF</button>
+                </div>
+                <div class="form-message" id="platformActionMessage" role="status" aria-live="polite" hidden></div>
+              </article>
+
+              <article class="panel wide advanced-control-panel">
+                <div class="panel-header"><div><p class="panel-kicker">Compatibility controller</p><h2>Security Lake delivery profiles</h2></div><button class="primary-button compact" id="configureSecurityLakeButton" type="button">Configure sources</button></div>
+                <div class="tool-body advanced-control-grid">
+                  <div class="platform-form">
+                    <label class="field-label" for="securityLakePrefixInput">Security Lake-assigned prefix</label><input id="securityLakePrefixInput" type="text" placeholder="ext/signalprism/custom-source-prefix">
+                    <label class="field-label" for="securityLakeProviderAccountInput">Provider account ID</label><input id="securityLakeProviderAccountInput" type="text" inputmode="numeric" maxlength="12" placeholder="123456789012">
+                    <label class="field-label" for="securityLakeExternalIdInput">Provider external ID</label><input id="securityLakeExternalIdInput" type="text" placeholder="signalprism-generated-external-id">
+                  </div>
+                  <div class="quality-list bounded-list" id="securityLakeSourceList"></div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header"><div><p class="panel-kicker">Replay and backpressure</p><h2>Continuous stream control</h2></div><button class="ghost-button compact" id="previewStreamReplayButton" type="button">Preview replay</button></div>
+                <div class="tool-body platform-form">
+                  <label class="field-label" for="streamReplayStartInput">Start</label><input id="streamReplayStartInput" type="datetime-local">
+                  <label class="field-label" for="streamReplayEndInput">End</label><input id="streamReplayEndInput" type="datetime-local">
+                  <label class="field-label" for="streamReplayProfileInput">OCSF profile</label><select id="streamReplayProfileInput"><option value="native-current">Native OCSF 1.8</option><option value="security-lake-1.3">Security Lake OCSF 1.3</option></select>
+                </div>
+                <div class="hint-row" id="streamReplayStatus">Ordered replay is capped at 5,000 events per request.</div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header"><div><p class="panel-kicker">Sensor inventory</p><h2>Collector health registration</h2></div><button class="ghost-button compact" id="saveSensorButton" type="button">Add sensor</button></div>
+                <div class="tool-body platform-form">
+                  <label class="field-label" for="sensorNameInput">Sensor name</label><input id="sensorNameInput" type="text" placeholder="us-east inspection fabric">
+                  <label class="field-label" for="sensorTypeInput">Sensor type</label><select id="sensorTypeInput"><option value="zeek">Zeek</option><option value="corelight">Corelight</option><option value="packet">Packet sensor</option><option value="cloud-tap">Cloud TAP</option><option value="virtual">Virtual collector</option></select>
+                  <label class="field-label" for="sensorRegionInput">Region</label><input id="sensorRegionInput" type="text" value="us-east-1">
+                </div>
+                <div class="quality-list bounded-list" id="sensorInventoryList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header"><div><p class="panel-kicker">Smart PCAP</p><h2>Immutable packet manifests and scoped access</h2></div><button class="primary-button compact" id="savePacketManifestButton" type="button">Create manifest</button></div>
+                <div class="tool-body advanced-control-grid">
+                  <div class="platform-form">
+                    <label class="field-label" for="packetObjectUriInput">Packet object URI</label><input id="packetObjectUriInput" type="text" placeholder="s3://evidence-bucket/tenant/capture.pcap">
+                    <label class="field-label" for="packetSha256Input">SHA-256</label><input id="packetSha256Input" type="text" minlength="64" maxlength="64" placeholder="64 hexadecimal characters">
+                    <label class="field-label" for="packetCaseIdInput">Case ID</label><input id="packetCaseIdInput" type="text" placeholder="Optional case ID">
+                    <label class="field-label" for="packetAccessReasonInput">Access reason</label><textarea id="packetAccessReasonInput" class="short-textarea" placeholder="Validate the evidence-linked network session for the approved investigation."></textarea>
+                  </div>
+                  <div class="quality-list bounded-list" id="packetManifestList"></div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header"><div><p class="panel-kicker">Response governance</p><h2>Execution policy</h2></div><button class="primary-button compact" id="saveResponsePolicyButton" type="button">Save policy</button></div>
+                <div class="tool-body platform-form">
+                  <label class="field-label" for="responsePolicyModeInput">Mode</label><select id="responsePolicyModeInput"><option value="observe">Observe</option><option value="approve">Approval required</option><option value="enforce">Approved enforcement</option></select>
+                  <label class="check-row"><input id="responseKillSwitchInput" type="checkbox"> Global tenant kill switch</label>
+                  <label class="check-row"><input id="responseRequireCaseInput" type="checkbox" checked> Require linked case</label>
+                  <label class="check-row"><input id="responseRollbackRequiredInput" type="checkbox" checked> Require rollback plan</label>
+                </div>
+                <div class="hint-row" id="responsePolicyStatus">Loading tenant response policy...</div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header"><div><p class="panel-kicker">Threat intelligence</p><h2>Feed lifecycle and retromatch</h2></div><button class="ghost-button compact" id="runThreatRetromatchButton" type="button">Retromatch</button></div>
+                <div class="tool-body platform-form">
+                  <label class="field-label" for="threatFeedNameInput">Feed name</label><input id="threatFeedNameInput" type="text" placeholder="Priority campaign indicators">
+                  <label class="field-label" for="threatFeedIndicatorsInput">Indicators, one per line</label><textarea id="threatFeedIndicatorsInput" class="short-textarea" spellcheck="false" placeholder="198.51.100.44&#10;c2.example.net"></textarea>
+                  <button class="primary-button compact full-width-button" id="saveThreatFeedButton" type="button">Save feed</button>
+                </div>
+                <div class="hint-row" id="threatIntelStatus">No retrospective match has run in this session.</div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Behavior analytics</p>
+                    <h2>Entity deviations</h2>
+                  </div>
+                  <span class="severity-count" id="behaviorFindingCount">0</span>
+                </div>
+                <div class="quality-list bounded-list" id="behaviorFindingList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Attack graph</p>
+                    <h2>Linked campaigns</h2>
+                  </div>
+                  <span class="severity-count" id="campaignCount">0</span>
+                </div>
+                <div class="quality-list bounded-list" id="campaignList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Historical search</p>
+                    <h2>Retrospective hunt</h2>
+                  </div>
+                  <button class="primary-button compact" id="runRetrospectiveHuntButton" type="button">Run Hunt</button>
+                </div>
+                <div class="tool-body platform-form-grid">
+                  <div>
+                    <label class="field-label" for="retrospectiveHuntInput">Fielded query</label>
+                    <input id="retrospectiveHuntInput" type="search" value="outcome:failure OR severity:high" placeholder="sourceIp:10.0.* AND destinationPort:443">
+                    <div class="hint-row">Supports AND, OR, NOT, grouping, wildcards, and numeric comparisons.</div>
+                  </div>
+                  <div class="quality-list bounded-list" id="retrospectiveHuntResults" aria-live="polite"></div>
+                </div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Investigation agent</p>
+                    <h2>Evidence-grounded analysis</h2>
+                  </div>
+                  <button class="primary-button compact" id="runAiInvestigationButton" type="button">Investigate</button>
+                </div>
+                <div class="tool-body platform-form-grid">
+                  <div>
+                    <label class="field-label" for="aiInvestigationObjectiveInput">Objective</label>
+                    <textarea id="aiInvestigationObjectiveInput" class="short-textarea" spellcheck="true" placeholder="Determine whether the highest-risk entity is part of a coordinated intrusion and identify the next validation steps."></textarea>
+                    <label class="field-label" for="aiInvestigationHuntInput">Optional hunt query</label>
+                    <input id="aiInvestigationHuntInput" type="text" placeholder="severity:high OR outcome:failure">
+                    <label class="check-row"><input id="aiInvestigationBedrockInput" type="checkbox"> Use AWS Bedrock synthesis when enabled</label>
+                  </div>
+                  <div class="ai-answer" id="aiInvestigationResult" aria-live="polite"></div>
+                </div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Integration fabric</p>
+                    <h2>Governed connectors</h2>
+                  </div>
+                  <button class="primary-button compact" id="saveConnectorButton" type="button">Save Connector</button>
+                </div>
+                <div class="tool-body platform-form-grid">
+                  <form id="connectorForm" class="platform-form" novalidate>
+                    <label class="field-label" for="connectorCatalogInput">Connector type</label>
+                    <select id="connectorCatalogInput"></select>
+                    <label class="field-label" for="connectorNameInput">Name</label>
+                    <input id="connectorNameInput" type="text" placeholder="Production Splunk HEC">
+                    <label class="field-label" for="connectorRegionInput">AWS region</label>
+                    <input id="connectorRegionInput" type="text" value="us-east-1">
+                    <label class="field-label" for="connectorStreamInput">Stream or source ID</label>
+                    <input id="connectorStreamInput" type="text" placeholder="signalprism-ocsf">
+                    <label class="field-label" for="connectorEndpointInput">HTTPS or syslog endpoint</label>
+                    <input id="connectorEndpointInput" type="url" placeholder="https://collector.example.com/services/collector">
+                    <label class="field-label" for="connectorSecretRefInput">Secrets Manager ARN</label>
+                    <input id="connectorSecretRefInput" type="text" placeholder="arn:aws:secretsmanager:us-east-1:123456789012:secret:signalprism/splunk">
+                  </form>
+                  <div class="quality-list bounded-list" id="connectorList"></div>
+                </div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Cloud estate</p>
+                    <h2>AWS Organizations onboarding</h2>
+                  </div>
+                  <button class="ghost-button compact" id="discoverOrganizationButton" type="button">Discover Accounts</button>
+                </div>
+                <div class="tool-body platform-form-grid">
+                  <div class="platform-form">
+                    <label class="field-label" for="organizationAccountInput">Account</label>
+                    <select id="organizationAccountInput"><option value="">No discovered accounts</option></select>
+                    <label class="field-label" for="organizationRegionInput">Region</label>
+                    <input id="organizationRegionInput" type="text" value="us-east-1">
+                    <label class="field-label" for="organizationS3Input">S3 prefixes, one per line</label>
+                    <textarea id="organizationS3Input" class="short-textarea" spellcheck="false" placeholder="s3://central-flow-logs/AWSLogs/"></textarea>
+                    <label class="field-label" for="organizationCloudWatchInput">CloudWatch log groups, one per line</label>
+                    <textarea id="organizationCloudWatchInput" class="short-textarea" spellcheck="false" placeholder="/aws/vpc/flowlogs"></textarea>
+                    <button class="primary-button compact" id="onboardOrganizationAccountButton" type="button">Create Managed Sources</button>
+                  </div>
+                  <div class="quality-list bounded-list" id="organizationAccountList"></div>
+                </div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Evidence intake</p>
+                    <h2>Direct immutable upload</h2>
+                  </div>
+                </div>
+                <div class="tool-body platform-form">
+                  <label class="field-label" for="directEvidenceFileInput">Evidence package</label>
+                  <input id="directEvidenceFileInput" type="file" accept=".log,.txt,.csv,.json,.jsonl,.gz,.zip,application/octet-stream">
+                  <button class="primary-button compact full-width-button" id="directEvidenceUploadButton" type="button">Hash and Upload</button>
+                  <div class="hint-row" id="directEvidenceUploadStatus">Requires an Object Lock evidence bucket.</div>
+                </div>
+                <div class="quality-list bounded-list" id="directEvidenceUploadList"></div>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Traffic governance</p>
+                    <h2>AI and cryptography posture</h2>
+                  </div>
+                </div>
+                <div class="tool-body platform-form">
+                  <label class="field-label" for="sanctionedAiProvidersInput">Sanctioned providers</label>
+                  <input id="sanctionedAiProvidersInput" type="text" value="AWS Bedrock" placeholder="AWS Bedrock, OpenAI">
+                </div>
+                <div class="quality-list bounded-list" id="trafficPostureList"></div>
+              </article>
+
+              <article class="panel wide">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Privileged identity</p>
+                    <h2>Custom roles and service accounts</h2>
+                  </div>
+                  <span class="panel-note">Tokens are shown once</span>
+                </div>
+                <div class="tool-body platform-access-grid">
+                  <div class="platform-form">
+                    <label class="field-label" for="customRoleNameInput">Custom role name</label>
+                    <input id="customRoleNameInput" type="text" placeholder="Threat Hunter">
+                    <label class="field-label" for="customRoleBaseInput">Base role</label>
+                    <select id="customRoleBaseInput"><option value="viewer">Viewer</option><option value="analyst">Analyst</option></select>
+                    <label class="field-label" for="customRolePermissionsInput">Additional permissions</label>
+                    <input id="customRolePermissionsInput" type="text" value="hunts:run, detections:write" placeholder="hunts:run, audit:read">
+                    <button class="ghost-button compact" id="saveCustomRoleButton" type="button">Create Role</button>
+                  </div>
+                  <div class="platform-form">
+                    <label class="field-label" for="serviceAccountNameInput">Service account name</label>
+                    <input id="serviceAccountNameInput" type="text" placeholder="SIEM export worker">
+                    <label class="field-label" for="serviceAccountRoleInput">Role</label>
+                    <select id="serviceAccountRoleInput"><option value="viewer">Viewer</option><option value="analyst">Analyst</option></select>
+                    <button class="ghost-button compact" id="createServiceAccountButton" type="button">Create 90-Day Token</button>
+                    <div class="one-time-secret" id="serviceAccountTokenOutput" hidden></div>
+                  </div>
+                  <div class="quality-list bounded-list" id="platformAccessList"></div>
+                </div>
+              </article>
+            </div>
+          </section>
+
           <section class="tab-panel" id="reportsPanel" role="tabpanel" aria-labelledby="reportsTab" hidden>
             <div class="analysis-grid">
               <article class="panel wide">
@@ -1129,6 +1685,137 @@
               </article>
             </div>
           </section>
+
+          <section class="tab-panel" id="learnPanel" role="tabpanel" aria-labelledby="learnTab" hidden>
+            <header class="learning-intro">
+              <div>
+                <p class="panel-kicker">Analyst enablement</p>
+                <h2>Understand NDR and SignalPrism</h2>
+                <p>Learn what network detection and response observes, how SignalPrism turns telemetry into evidence, and how to move from a signal to a defensible decision.</p>
+              </div>
+              <button class="primary-button compact" type="button" data-learn-target="overview" data-learn-demo="true">Practice with guided demo</button>
+            </header>
+
+            <section class="learning-section" aria-labelledby="ndrLifecycleTitle">
+              <div class="section-heading learning-heading">
+                <div>
+                  <p class="panel-kicker">The NDR lifecycle</p>
+                  <h2 id="ndrLifecycleTitle">From network activity to response</h2>
+                </div>
+                <span class="panel-note">Metadata-first, evidence-grounded</span>
+              </div>
+              <div class="learning-flow" aria-label="Network detection and response lifecycle">
+                <article class="learning-stage">
+                  <span class="learning-stage-number">1</span>
+                  <strong>Observe</strong>
+                  <p>Collect VPC Flow Logs, protocol metadata, cloud identity events, and sensor health without relying on endpoint agents.</p>
+                </article>
+                <article class="learning-stage">
+                  <span class="learning-stage-number">2</span>
+                  <strong>Detect</strong>
+                  <p>Compare behavior with rules, peer baselines, threat intelligence, and attack context to find meaningful deviations.</p>
+                </article>
+                <article class="learning-stage">
+                  <span class="learning-stage-number">3</span>
+                  <strong>Investigate</strong>
+                  <p>Correlate entities, communication paths, timestamps, identities, assets, and supporting records into an attack story.</p>
+                </article>
+                <article class="learning-stage">
+                  <span class="learning-stage-number">4</span>
+                  <strong>Respond</strong>
+                  <p>Create a case, preserve evidence, seek approval, contain the threat, verify the result, and retain an audit trail.</p>
+                </article>
+              </div>
+            </section>
+
+            <div class="learning-grid">
+              <article class="panel learning-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Start here</p>
+                    <h2>What NDR can tell you</h2>
+                  </div>
+                </div>
+                <div class="learning-copy">
+                  <p>NDR analyzes who communicated, where, when, how, and how that behavior changed. It is strongest at exposing lateral movement, command-and-control traffic, scanning, unusual services, policy violations, and activity that crosses cloud or endpoint boundaries.</p>
+                  <div class="learning-boundary">
+                    <strong>Important boundary</strong>
+                    <span>Flow logs describe connections, not packet payloads. A flow can prove that two entities communicated, but encrypted content usually requires protocol metadata, packet evidence, endpoint context, or another corroborating source.</span>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel learning-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Decision support</p>
+                    <h2>Severity is not urgency</h2>
+                  </div>
+                </div>
+                <div class="learning-copy">
+                  <p><strong>Severity</strong> estimates the potential consequence of a detection. <strong>Urgency</strong> helps decide what to work first by combining severity with evidence confidence and current operating context.</p>
+                  <dl class="score-definition-list">
+                    <div><dt>Confidence</dt><dd>How strongly the available evidence supports the detection.</dd></div>
+                    <div><dt>Velocity</dt><dd>How quickly related activity is accumulating.</dd></div>
+                    <div><dt>Privilege</dt><dd>Whether administrative identities or sensitive roles are involved.</dd></div>
+                    <div><dt>Breadth</dt><dd>How many entities, accounts, or network segments are affected.</dd></div>
+                    <div><dt>Blast radius</dt><dd>The plausible scope of impact if the activity succeeds.</dd></div>
+                  </dl>
+                </div>
+              </article>
+
+              <article class="panel wide learning-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Screen map</p>
+                    <h2>What you are seeing in SignalPrism</h2>
+                  </div>
+                </div>
+                <div class="learning-screen-map">
+                  <div><strong>Overview</strong><span>Your prioritized operating picture: urgency, source health, entity resolution, exposure paths, and telemetry economics.</span><button class="ghost-button compact" type="button" data-learn-target="overview">Open overview</button></div>
+                  <div><strong>Detections</strong><span>Signals generated by rules and analytics. Read the reason, evidence, confidence, affected entities, and time window together.</span><button class="ghost-button compact" type="button" data-learn-target="detections">Open detections</button></div>
+                  <div><strong>Entities and Topology</strong><span>IP addresses, identities, workloads, and applications connected through time-aware communication paths.</span><button class="ghost-button compact" type="button" data-learn-target="topology">Open topology</button></div>
+                  <div><strong>Hunt and Records</strong><span>Query normalized evidence, test a hypothesis, and inspect the source records behind a signal.</span><button class="ghost-button compact" type="button" data-learn-target="hunt">Open hunt</button></div>
+                  <div><strong>Cases</strong><span>Assign ownership, document conclusions, manage tasks and SLAs, and preserve the investigation audit trail.</span><button class="ghost-button compact" type="button" data-learn-target="cases">Open cases</button></div>
+                  <div><strong>Reports</strong><span>Create evidence-grounded summaries and governed exports. AI output remains supporting analysis, not the source of truth.</span><button class="ghost-button compact" type="button" data-learn-target="reports">Open reports</button></div>
+                </div>
+              </article>
+
+              <article class="panel wide learning-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Investigation playbook</p>
+                    <h2>How to evaluate a signal</h2>
+                  </div>
+                  <span class="panel-note">Evidence before action</span>
+                </div>
+                <ol class="learning-playbook">
+                  <li><strong>Validate collection.</strong><span>Check source and sensor health, event time, region, account, and whether expected telemetry is missing.</span></li>
+                  <li><strong>Read the detection claim.</strong><span>Identify the behavior being asserted and separate observed facts from inferred intent.</span></li>
+                  <li><strong>Establish context.</strong><span>Review asset criticality, identity privilege, exposure, peer behavior, threat intelligence, and prior activity.</span></li>
+                  <li><strong>Reconstruct the path.</strong><span>Use records and topology replay to determine origin, sequence, affected entities, and possible lateral movement.</span></li>
+                  <li><strong>Decide and document.</strong><span>Close as expected behavior, tune the detection, escalate the case, or request a reversible response with approval.</span></li>
+                </ol>
+              </article>
+
+              <article class="panel wide learning-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Reference</p>
+                    <h2>Analyst glossary</h2>
+                  </div>
+                </div>
+                <div class="learning-glossary">
+                  <details><summary>VPC Flow Log</summary><p>A metadata record describing a network flow, commonly including source, destination, ports, protocol, packet and byte counts, action, and time range.</p></details>
+                  <details><summary>Entity</summary><p>A resolvable object involved in activity, such as an IP address, workload, host, user, role, account, or application.</p></details>
+                  <details><summary>Community ID</summary><p>A direction-independent flow identifier used to correlate the same network session across compatible tools and sensors.</p></details>
+                  <details><summary>OCSF</summary><p>The Open Cybersecurity Schema Framework. SignalPrism uses it to represent network activity and security findings consistently across integrations.</p></details>
+                  <details><summary>Baseline and drift</summary><p>A baseline represents expected peer or seasonal behavior. Drift indicates that the underlying behavior has changed enough to require review or model retraining.</p></details>
+                  <details><summary>False positive</summary><p>A detection that correctly matched its logic but does not represent unwanted activity in context. Document why, then tune narrowly without hiding similar threats.</p></details>
+                </div>
+              </article>
+            </div>
+          </section>
         </section>
       </section>
     </main>
@@ -1153,6 +1840,6 @@
       </form>
     </dialog>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=0.3.0"></script>
   </body>
 </html>

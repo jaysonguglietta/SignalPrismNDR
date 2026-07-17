@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: SignalPrism NDR read-only member-account ingest role for AWS Organizations StackSets.
+
+Parameters:
+  CentralTaskRoleArn:
+    Type: String
+    Description: ARN of the SignalPrism ECS task role in the delegated administrator account.
+    AllowedPattern: '^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$'
+  ExternalId:
+    Type: String
+    Description: Unique external ID configured in the central SignalPrism deployment.
+    MinLength: 16
+    MaxLength: 1224
+    NoEcho: true
+  RoleName:
+    Type: String
+    Default: SignalPrismReadOnlyRole
+    AllowedPattern: '^[A-Za-z0-9+=,.@_/-]{1,64}$'
+  FlowLogBucketArns:
+    Type: CommaDelimitedList
+    Description: S3 bucket ARNs that SignalPrism may list.
+  FlowLogObjectArns:
+    Type: CommaDelimitedList
+    Description: S3 object ARNs, including prefixes and wildcards, that SignalPrism may read.
+  CloudWatchLogGroupArns:
+    Type: CommaDelimitedList
+    Description: CloudWatch log group ARNs that SignalPrism may filter.
+
+Resources:
+  SignalPrismReadOnlyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: Tenant-scoped read-only ingest for SignalPrism NDR.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TrustSignalPrismCentralTask
+            Effect: Allow
+            Principal:
+              AWS: !Ref CentralTaskRoleArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      Policies:
+        - PolicyName: SignalPrismFlowLogRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListApprovedBuckets
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Ref FlowLogBucketArns
+              - Sid: ReadApprovedObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Ref FlowLogObjectArns
+              - Sid: FilterApprovedLogGroups
+                Effect: Allow
+                Action: logs:FilterLogEvents
+                Resource: !Ref CloudWatchLogGroupArns
+      Tags:
+        - Key: Application
+          Value: SignalPrism NDR
+        - Key: ManagedBy
+          Value: CloudFormation StackSets
+
+Outputs:
+  RoleArn:
+    Description: Role ARN used by SignalPrism managed sources.
+    Value: !GetAtt SignalPrismReadOnlyRole.Arn

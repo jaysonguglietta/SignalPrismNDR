@@ -47,7 +47,7 @@ Variables:
 2. Browser builds a bounded investigation context containing metrics, top detections, priority entities, paths, application mix, ports, and sample records.
 3. Browser sends the context and question to `POST /api/ai/ask`.
 4. Backend checks tenant and role access. AI requires `admin` or `analyst`.
-5. Backend signs a Bedrock Runtime Converse API request with SigV4.
+5. Backend bounds depth, nodes, arrays, keys, and string lengths; labels the evidence block as attacker-controlled data; then signs a Bedrock Runtime Converse API request with SigV4.
 6. Backend returns the generated answer or summary.
 7. Backend appends an audit record for the AI invocation.
 
@@ -98,7 +98,8 @@ Custom examples:
 - Viewer sessions cannot invoke AI.
 - Requests are rate limited with the rest of the API.
 - AI invocations are audited.
-- Context is truncated.
+- Context is structurally bounded and truncated, and its SHA-256 is returned for investigation traceability.
+- System policy tells the model never to follow instructions, links, role changes, or requests for secrets found inside evidence. No tools or automated response actions are available to the model.
 - Responses should be treated as analyst assistance, not authoritative findings.
 
 ## Production Guardrails
@@ -109,6 +110,7 @@ Custom examples:
 - Review data residency and provider terms for the selected model and region.
 - Prefer private deployments with OIDC and tenant/role controls.
 - Validate AI output before containment, escalation, or customer-facing reporting.
+- Treat prompt injection as a residual model risk. Evidence labels and system instructions are defense-in-depth, not an authorization mechanism; all downstream actions still require server-side role and governance checks.
 
 ## Failure Modes
 

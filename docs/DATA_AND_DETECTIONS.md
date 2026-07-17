@@ -10,7 +10,13 @@ SignalPrism NDR supports:
 - Gzipped logs in browsers with `DecompressionStream`.
 - CloudWatch Logs JSON and JSONL records with `message`.
 - Azure NSG Flow Log JSON.
+- Azure Activity and Microsoft Entra audit JSON.
 - GCP VPC Flow Log JSON.
+- GCP audit JSON.
+- Kubernetes audit and Cilium Hubble JSON.
+- CloudTrail, Route 53 Resolver, GuardDuty, Zeek, and Suricata JSON/JSONL.
+- Gigamon IPFIX/CEF and ExtraHop RevealX records.
+- A bounded generic JSON event contract for pre-normalized integrations.
 
 ## Normalized Flow Record
 
@@ -31,6 +37,8 @@ SignalPrism NDR supports:
 - `action`
 - `logStatus`
 - `raw`
+
+Enterprise telemetry is normalized separately as `TelemetryEvent`. It adds provider, format, category, identity, resource, workload, application, DNS, TLS/certificate, JA3, post-quantum key-exchange, outcome, severity, and source evidence identifiers. Raw context is bounded before storage so a single event cannot expand tenant records without limit.
 
 The parser preserves enough source fields for analyst validation while normalizing protocol names, numeric fields, timestamps, and action labels.
 
@@ -58,6 +66,8 @@ Evidence-run metadata stays bounded for fast UI and API reads. When the backend 
 - Analysis summary.
 
 Local mode stores package JSON under `.ndr-data/evidence-packages/<tenant>/`. Production mode can store packages in S3 with Object Lock retention.
+
+Raw evidence text is hashed with SHA-256. Evidence-vault manifests also receive a server-side HMAC-SHA256 attestation with a dedicated key and key identifier; this proves that a manifest passed through the trusted backend, while S3 Object Lock supplies retention enforcement for the underlying package.
 
 ## Detection Categories
 
@@ -152,9 +162,37 @@ Tenant detection rules include:
 - Owner.
 - Status: `draft`, `test`, `production`, or `retired`.
 - Version and approval metadata.
-- Test count and last-tested timestamp.
+- Immutable backtest ID, rule digest/version, dataset/engine identity, quality gate, result metrics, and tested timestamp.
 
-The Enterprise workspace can clone, test, promote, retire, score, and export these rules as `signalprism.detections.v1` JSON.
+The Enterprise workspace can clone, test, score, and export these rules as `signalprism.detections.v1` JSON. Production promotion and retirement are admin-only server operations. Promotion requires a recent passing server backtest for the exact current rule digest/version, ATT&CK mapping, a substantive description, an atomic version match, and a separate author/approver by default. Client-supplied counters and timestamps are ignored, and any content edit invalidates prior backtest evidence.
+
+Signed content bundles add a manifest ID/version, SHA-256 rules digest, publisher metadata, and Ed25519 signature. Verification uses the configured public key. Import never grants production status or carries over a passing backtest.
+
+## Enterprise Telemetry And Correlation
+
+The backend normalizes AWS, Azure, GCP, Kubernetes/Cilium, Gigamon, ExtraHop, Zeek, Suricata, and bounded generic events into `TelemetryEvent`. Common fields include time, provider, category, account/region, network endpoints, identity, action, outcome, resource/workload, application, DNS query, TLS posture, severity, signature, bytes, and bounded raw context.
+
+Current cross-source rules identify:
+
+- AWS authentication spray (`T1110`).
+- Privilege change followed by related network activity (`T1098`).
+- GuardDuty findings corroborated by independent network telemetry (`T1071`).
+- Long/high-cardinality DNS label activity (`T1048`).
+- Repeated Suricata IDS signatures (`T1071`).
+
+Every correlation carries source formats and evidence IDs. Correlations are investigation leads, not automatic containment decisions.
+
+## Behavior, Campaign, And Retrospective Analytics
+
+Behavior profiles group evidence by resolved entity and compare recent activity with deterministic historical features. Findings cover new peers/services, off-hours behavior, three-sigma volume deviation, periodic beacon candidates, and repeated failures. Every finding includes the triggering feature values and evidence IDs.
+
+Campaign assembly builds connected components across shared entities, evidence, and bounded time windows. It reports stage progression, blast radius, source diversity, confidence, and linked evidence without claiming causality that the records do not support.
+
+Retrospective hunts use an allowlisted parser rather than `eval`, dynamic SQL, or user-provided regular expressions. Supported fields and operators are documented in the API guide. Detection backtests report matched evidence, noise, and optional precision/recall when labeled benign and malicious fixtures are provided.
+
+## OCSF Projection
+
+Normalized network events map to Network Activity (`class_uid=4001`); correlations, behavior findings, and campaigns map to Security Finding (`class_uid=2001`). Native integrations use OCSF 1.8, while Amazon Security Lake custom sources use an isolated OCSF 1.3 profile. Schema validation and event-time ordering occur before delivery. The AWS stack uses one Firehose stream per event class, converts records to Zstandard Parquet, and dynamically partitions by region, account ID, and event day.
 
 ## Threat Intelligence Model
 
@@ -206,13 +244,13 @@ Enrichment is stored in browser storage and can be included in tenant workspace 
 - CSV for detections.
 - OCSF-like JSON for SIEM-oriented downstream use.
 - CEF for legacy SIEM ingestion.
-- Redacted JSON for privacy-aware sharing.
-- Investigation package JSON for complete case handoff. Backend-enabled exports are RBAC-controlled and audited.
+- Redacted JSON for privacy-aware sharing using session-scoped HMAC-SHA256 pseudonyms.
+- Investigation package JSON for complete case handoff. Backend-enabled exports are RBAC-controlled, audited, separately approved, expiring, and one-time by default.
 - Backend audit NDJSON.
 - Detection-as-code JSON.
 - Investigation graph JSON.
 - Replay timeline JSON.
-- Security Lake OCSF NDJSON.
+- Security Lake OCSF NDJSON with approval bound to the payload SHA-256.
 
 ## Enterprise Artifacts
 

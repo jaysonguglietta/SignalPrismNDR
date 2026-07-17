@@ -25,6 +25,19 @@ Select `Demo` in the `Investigation` panel to load a complete sample investigati
 
 Use this when evaluating the product or presenting it to stakeholders.
 
+## Learn NDR In The Application
+
+Open `Learn` for an analyst-oriented explanation of network detection and response and the SignalPrism interface. The learning center includes:
+
+- The NDR lifecycle from observation through governed response.
+- What network metadata can establish and when packet, endpoint, identity, or protocol evidence is still needed.
+- The difference between detection severity and operational urgency.
+- A screen map linking directly to Overview, Detections, Topology, Hunt, Cases, and Reports.
+- A five-step signal investigation playbook.
+- Expandable definitions for flow logs, entities, Community ID, OCSF, model drift, and false positives.
+
+Select `Practice with guided demo` to load sample evidence and continue in the Overview. Learning-center navigation buttons switch to the corresponding operational view without changing the investigation.
+
 ## Investigation Workspaces
 
 The `Investigation` panel stores repeatable workspaces. With the backend running, workspaces are saved to the tenant store. Without the backend, the browser uses local fallback storage. A workspace can retain:
@@ -207,12 +220,17 @@ Use `Async` on a scheduled job to queue a background CloudWatch or S3 import. Th
 Open `Enterprise` for advanced NDR operations:
 
 - `Operational readiness`: scores source ownership, rule maturity, Security Lake configuration, asset context, and governance controls.
+- `Detection operations`: summarizes production-rule maturity, test freshness, ATT&CK mapping, current triage load, and async import failures.
+- `Production hardening`: reviews authentication mode, session protection, direct-ingest posture, tenant persistence, raw evidence storage, audit visibility, source accountability, privileged access, retention, and AI guardrails.
+- `Signal fusion`: ingests mixed CloudTrail, Route 53 DNS, GuardDuty, Zeek, or Suricata JSON and creates evidence-linked cross-source findings.
+- `Governed response`: requests isolation, IP block, access-key disablement, ticket, or SOC notification actions. A different tenant admin must approve before optional automation.
+- `Detection supply chain`: verifies signed detection bundles and lets admins import verified rules into test status.
 - `Investigator copilot`: generates deterministic natural-language answers with citations to detections, flows, cases, assets, and threat-intel matches.
 - `Source health`: checks managed source ownership, observed scope, async import status, and parser drift.
 - `Source discovery`: extracts accounts, ENIs, CIDR hints, and source candidates from current evidence.
 - `Threat intelligence`: imports JSONL or CSV indicators and enriches current evidence.
 - `Entity risk`: calculates explainable risk scores from detections, sensitive flows, asset criticality, and threat intelligence.
-- `Detection engineering`: creates, tests, clones, promotes, and exports detection-as-code rules.
+- `Detection engineering`: creates, tests, clones, and exports detection-as-code rules. Only tenant admins can promote or retire production rules, and production promotion requires a passing test, ATT&CK mapping, a substantive description, and a separate approver by default.
 - `Security Lake and SIEM`: creates OCSF NDJSON exports and records backend manifests.
 - `Asset and identity context`: accepts owners, assets, criticality, environment, account, role, IP, ENI, or instance IDs.
 - `Investigation graph` and `Timeline replay`: export entity graphs and incident reconstruction timelines.
@@ -222,6 +240,8 @@ Open `Enterprise` for advanced NDR operations:
 - `Evidence vault`: creates retention and chain-of-custody manifests for investigation packages.
 - `Enterprise reporting`: generates analyst, executive, compliance, and operations-manager reports.
 - `Tenant administration`: summarizes SSO, SCIM, RBAC, and AI permission readiness.
+
+For a first signal-fusion run, select `Load Sample`, then `Normalize and Ingest`, and finally `Correlate`. Review the source formats, evidence count, score, entity, and ATT&CK technique before linking a response request. Response execution may remain disabled even after approval; the status explicitly distinguishes `approved` from `executed`.
 
 ## Cases
 
@@ -247,8 +267,21 @@ Admins can:
 - Mark users active or suspended.
 - Associate users with managed sources.
 - Assign or clear ownership for CloudWatch and S3 source inventory entries.
+- Export an access review covering privileged users, analyst source scopes, stale roster entries, and source-owner gaps.
+- Refresh, filter, and export tenant audit events as NDJSON.
+- Review pending evidence-release requests, approve requests created by another user, and consume approved exports during their short validity window.
 
 This roster documents SignalPrism ownership and access intent. It does not modify your identity provider; SSO group membership remains managed in the IdP.
+
+## Controlled Exports
+
+Backend-enabled investigation packages and Security Lake exports use a two-person release workflow by default:
+
+1. An analyst requests the export and receives a pending approval ID.
+2. A different tenant admin reviews and approves the request in `Admin > Evidence release approvals`.
+3. The requester consumes the approval once before it expires.
+
+Security Lake approvals are bound to the SHA-256 of the reviewed OCSF payload. If the evidence changes after approval, the export is rejected and a new request is required. Privacy-aware JSON exports use a random, session-scoped HMAC key so pseudonyms cannot be correlated across separate browser sessions.
 
 ## Topology Replay
 
@@ -297,3 +330,20 @@ Use redacted exports when sharing evidence outside the security team.
 The investigation package includes workspace metadata, summary counts, detections, observations, top entities, topology paths, managed sources, saved hunts, cases, summaries, AI answer text, and a bounded record sample. When the backend is running, package export is RBAC-controlled and audited.
 
 Raw evidence package storage is separate from the downloadable investigation package. It preserves the full raw upload or import payload for retained evidence handling, while analyst exports stay bounded and redacted when needed.
+
+## Platform Workspace
+
+Open **Platform** for advanced tenant operations:
+
+1. Run behavior analytics after telemetry ingest to compare entities with the previous profile.
+2. Build campaigns to link correlations and behavior findings by entity, evidence, and time.
+3. Run a retrospective query such as `sourceIp:10.0.* AND (outcome:failure OR severity:high)`.
+4. Set an investigation objective and optional hunt query. Bedrock synthesis is optional; deterministic evidence collection and citations always run.
+5. Assess AI and cryptography posture after ingesting DNS, SNI, TLS, or sensor metadata.
+6. Publish OCSF records. When export approval is enabled, a separate admin must approve dispatch.
+7. Configure connectors with HTTPS endpoints and Secrets Manager ARNs. Tests validate locally or emit EventBridge adapter intent.
+8. Discover Organizations accounts, select an account, and create managed S3/CloudWatch sources.
+9. Upload full evidence directly to the Object Lock bucket. The browser hashes it before upload.
+10. Create specialist roles and expiring service accounts. Record one-time tokens immediately; only token digests remain in SignalPrism.
+
+Response actions default to **Dry run**. Select **Enforce after approval** only after the adapter and rollback have been tested.

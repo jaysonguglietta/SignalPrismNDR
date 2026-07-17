@@ -130,6 +130,7 @@ const STORAGE_KEYS = {
   hunts: "ndrFlowConsole.hunts.v1",
   sources: "ndrFlowConsole.sources.v1",
   tenantUsers: "ndrFlowConsole.tenantUsers.v1",
+  auditEvents: "ndrFlowConsole.auditEvents.v1",
   seenJobRuns: "ndrFlowConsole.seenJobRuns.v1",
   jobRuns: "ndrFlowConsole.jobRuns.v1",
   detectionRules: "ndrFlowConsole.detectionRules.v1",
@@ -144,6 +145,13 @@ const STORAGE_KEYS = {
   enterpriseReports: "ndrFlowConsole.enterpriseReports.v1",
   enrichment: "ndrFlowConsole.enrichment.v1"
 };
+const PROTECTED_STORAGE_KEYS = new Set(Object.values(STORAGE_KEYS));
+let activeStorageScope = "signed-out";
+const MAX_BROWSER_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_BROWSER_TEXT_BYTES = 32 * 1024 * 1024;
+const MAX_STRUCTURED_MESSAGES = 100000;
+const MAX_STRUCTURED_DEPTH = 16;
+let pseudonymKeyCache = null;
 
 const SAMPLE_LOG = `#Fields: version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status
 2 123456789012 eni-0a1b2c3d 198.51.100.10 10.0.1.15 52511 22 6 3 180 1714771200 1714771260 REJECT OK
@@ -172,6 +180,7 @@ const state = {
   huntResults: [],
   sort: { field: "start", direction: "desc" },
   backend: { online: false, authMode: "local-dev", principal: null },
+  enterprise: { telemetryEvents: [], correlations: [], responseActions: [], contentBundles: [], readiness: null, contentVerification: null },
   jobRunPoller: null,
   replayTimer: null,
   pendingConfirm: null
@@ -179,8 +188,11 @@ const state = {
 
 const els = {};
 let idbApi = null;
+let editingCaseRevision = 0;
 let backendApi = null;
 let topologyApi = null;
+let platformController = null;
+let operationsController = null;
 
 if (typeof document !== "undefined") {
   document.addEventListener("DOMContentLoaded", () => {
@@ -333,11 +345,21 @@ function cacheElements() {
     "adminUserSourceInput",
     "saveTenantUserButton",
     "adminUserCountLabel",
+    "adminOpsGrid",
     "adminUserList",
     "sourceOwnerSourceInput",
     "sourceOwnerUserInput",
     "assignSourceOwnerButton",
     "sourceOwnershipList",
+    "exportAccessReviewButton",
+    "accessReviewList",
+    "refreshExportApprovalsButton",
+    "exportApprovalList",
+    "refreshAuditButton",
+    "exportAuditButton",
+    "auditActionFilterInput",
+    "auditActorFilterInput",
+    "auditReviewList",
     "topologyCanvas",
     "playReplayButton",
     "stepReplayBackButton",
@@ -348,6 +370,31 @@ function cacheElements() {
     "replayEventList",
     "enterpriseReadinessLabel",
     "enterpriseMetricGrid",
+    "detectionOpsLabel",
+    "detectionOpsGrid",
+    "detectionOpsList",
+    "refreshHardeningButton",
+    "productionHardeningList",
+    "telemetryFormatInput",
+    "telemetryPayloadInput",
+    "loadTelemetrySampleButton",
+    "ingestTelemetryButton",
+    "correlateTelemetryButton",
+    "telemetryMetricGrid",
+    "correlationList",
+    "responseActionStatusLabel",
+    "responseActionTypeInput",
+    "responseExecutionModeInput",
+    "responseActionTargetInput",
+    "responseCaseInput",
+    "responseCorrelationInput",
+    "responseActionReasonInput",
+    "requestResponseActionButton",
+    "responseActionList",
+    "detectionContentInput",
+    "verifyDetectionContentButton",
+    "importDetectionContentButton",
+    "detectionContentList",
     "copilotQuestionInput",
     "generateCitedCopilotButton",
     "copilotCitationList",
@@ -374,7 +421,7 @@ function cacheElements() {
     "exportDetectionAsCodeButton",
     "detectionAsCodeList",
     "securityLakeBucketInput",
-    "securityLakePrefixInput",
+    "enterpriseSecurityLakePrefixInput",
     "siemTargetInput",
     "siemEndpointInput",
     "saveIntegrationButton",
@@ -576,6 +623,22 @@ function wireEvents() {
     tab.addEventListener("click", () => {
       activateTab(tab.dataset.tab);
     });
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const tabs = [...document.querySelectorAll(".tab")].filter((item) => !item.disabled);
+      const current = tabs.indexOf(tab);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      tabs[next].focus();
+      activateTab(tabs[next].dataset.tab);
+    });
+  });
+  document.querySelectorAll("[data-learn-target]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (button.dataset.learnDemo === "true") await loadGuidedDemo();
+      activateTab(button.dataset.learnTarget);
+      document.querySelector(".tabs")?.scrollIntoView({ block: "start" });
+    });
   });
 
   els.exportButton.addEventListener("click", exportFilteredCsv);
@@ -606,6 +669,19 @@ function wireEvents() {
     if (del) deleteTenantUser(del.dataset.deleteTenantUser);
   });
   els.assignSourceOwnerButton.addEventListener("click", assignSourceOwner);
+  els.exportAccessReviewButton.addEventListener("click", exportAccessReview);
+  els.refreshExportApprovalsButton.addEventListener("click", renderExportApprovals);
+  els.exportApprovalList.addEventListener("click", (event) => {
+    const approve = event.target.closest("[data-approve-export]");
+    const download = event.target.closest("[data-download-export]");
+    if (approve) approveExportRequest(approve.dataset.approveExport);
+    if (download) downloadApprovedExport(download.dataset.downloadExport, download.dataset.exportKind);
+  });
+  els.refreshAuditButton.addEventListener("click", () => refreshAuditEventsFromBackend(false));
+  els.exportAuditButton.addEventListener("click", exportAuditReviewNdjson);
+  [els.auditActionFilterInput, els.auditActorFilterInput].forEach((input) => {
+    input.addEventListener("input", renderAuditReview);
+  });
   els.generateCitedCopilotButton.addEventListener("click", generateCitedCopilotAnswer);
   els.discoverSourcesButton.addEventListener("click", discoverSourcesFromEvidence);
   els.applyThreatIntelButton.addEventListener("click", applyThreatIntelInput);
@@ -634,6 +710,17 @@ function wireEvents() {
   els.saveGovernanceButton.addEventListener("click", saveGovernanceControls);
   els.createEvidenceVaultButton.addEventListener("click", createEvidenceVaultBundle);
   els.generateEnterpriseReportButton.addEventListener("click", generateEnterpriseReport);
+  els.refreshHardeningButton.addEventListener("click", () => refreshEnterpriseSecurityOperations(false));
+  els.loadTelemetrySampleButton.addEventListener("click", loadEnterpriseTelemetrySample);
+  els.ingestTelemetryButton.addEventListener("click", ingestEnterpriseTelemetry);
+  els.correlateTelemetryButton.addEventListener("click", correlateEnterpriseTelemetry);
+  els.requestResponseActionButton.addEventListener("click", requestEnterpriseResponseAction);
+  els.responseActionList.addEventListener("click", (event) => {
+    const approve = event.target.closest("[data-approve-response-action]");
+    if (approve) approveEnterpriseResponseAction(approve.dataset.approveResponseAction);
+  });
+  els.verifyDetectionContentButton.addEventListener("click", verifyEnterpriseDetectionContent);
+  els.importDetectionContentButton.addEventListener("click", importEnterpriseDetectionContent);
   els.createCaseFromTopDetectionButton.addEventListener("click", createCaseFromTopDetection);
   els.saveCaseButton.addEventListener("click", saveCaseForm);
   els.caseList.addEventListener("click", (event) => {
@@ -659,6 +746,7 @@ function activateTab(tabName) {
     const isActive = tab.dataset.tab === tabName;
     tab.classList.toggle("active", isActive);
     tab.setAttribute("aria-selected", String(isActive));
+    tab.tabIndex = isActive ? 0 : -1;
   });
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     const isActive = panel.id === `${tabName}Panel`;
@@ -667,6 +755,12 @@ function activateTab(tabName) {
   });
   if (tabName === "admin") renderTenantAdmin();
   if (tabName === "enterprise") renderEnterprise();
+  if (tabName === "platform") {
+    platformController?.refresh(false);
+    operationsController?.refreshPlatformControls();
+  }
+  if (tabName === "overview") operationsController?.refresh(false);
+  if (tabName === "cases") operationsController?.refreshCaseTasks();
 }
 
 function clearCurrentEvidence() {
@@ -722,30 +816,50 @@ function clearInputMessage() {
 }
 
 async function initializePersistentData() {
+  try {
+    purgeLegacyStorageKeys();
+    const [loadedIdbApi, loadedBackendApi, loadedTopologyApi, platformUiApi, operationsUiApi] = await Promise.all([
+      import("./src/idb-store.js"),
+      import("./src/backend-client.js"),
+      import("./src/topology.js"),
+      import("./src/platform-ui.mjs"),
+      import("./src/operations-ui.mjs")
+    ]);
+    idbApi = loadedIdbApi;
+    backendApi = loadedBackendApi;
+    topologyApi = loadedTopologyApi;
+    const loginResult = await backendApi.completeSsoCallback();
+    if (loginResult?.principal) showToast(`Signed in as ${loginResult.principal.name || loginResult.principal.subject}.`);
+    await refreshBackendStatus();
+    platformController = platformUiApi.createPlatformController({ backendApi, notify: showToast });
+    operationsController = operationsUiApi.createOperationsController({ backendApi, notify: showToast });
+    operationsController.init();
+    hydrateScopedClientState();
+    await refreshServerWorkspaces();
+    await refreshManagedSourcesFromBackend();
+    await refreshCases();
+    await refreshTenantUsersFromBackend();
+    await refreshAuditEventsFromBackend(true);
+    await refreshEnterpriseFromBackend();
+    await platformController.refresh(false);
+    await operationsController.refresh(false);
+    await operationsController.refreshPlatformControls();
+    await operationsController.refreshCaseTasks();
+    await refreshJobRuns(true);
+    startJobRunPolling();
+  } catch (error) {
+    await setActiveStorageScope(null, "offline-local");
+    hydrateScopedClientState();
+    showToast(`Module initialization warning: ${error.message}`, "warn");
+  }
+}
+
+function hydrateScopedClientState() {
   state.enrichment = loadJson(STORAGE_KEYS.enrichment, {});
   state.activeWorkspaceId = loadJson(STORAGE_KEYS.activeWorkspace, "");
   els.ruleProfileSelect.value = loadJson(STORAGE_KEYS.ruleProfile, "balanced");
   updateRuleProfileDescription();
   renderWorkspaces();
-  try {
-    [idbApi, backendApi, topologyApi] = await Promise.all([
-      import("./src/idb-store.js"),
-      import("./src/backend-client.js"),
-      import("./src/topology.js")
-    ]);
-    const loginResult = await backendApi.completeSsoCallback();
-    if (loginResult?.principal) showToast(`Signed in as ${loginResult.principal.name || loginResult.principal.subject}.`);
-    await refreshBackendStatus();
-    await refreshServerWorkspaces();
-    await refreshManagedSourcesFromBackend();
-    await refreshCases();
-    await refreshTenantUsersFromBackend();
-    await refreshEnterpriseFromBackend();
-    await refreshJobRuns(true);
-    startJobRunPolling();
-  } catch (error) {
-    showToast(`Module initialization warning: ${error.message}`, "warn");
-  }
 }
 
 function loadJson(key, fallback) {
@@ -753,7 +867,7 @@ function loadJson(key, fallback) {
     return fallback;
   }
   try {
-    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+    return JSON.parse(localStorage.getItem(scopedStorageKey(key))) ?? fallback;
   } catch {
     return fallback;
   }
@@ -763,14 +877,44 @@ function saveJson(key, value) {
   if (typeof localStorage === "undefined") {
     return;
   }
-  localStorage.setItem(key, JSON.stringify(value));
+  localStorage.setItem(scopedStorageKey(key), JSON.stringify(value));
 }
 
 function removeJson(key) {
   if (typeof localStorage === "undefined") {
     return;
   }
-  localStorage.removeItem(key);
+  localStorage.removeItem(scopedStorageKey(key));
+}
+
+function scopedStorageKey(key, scope = activeStorageScope) {
+  return PROTECTED_STORAGE_KEYS.has(key) ? `${key}.scope.${scope}` : key;
+}
+
+function storageScopeForPrincipal(principal, fallback = "signed-out") {
+  if (!principal) return fallback;
+  const tenant = String(principal.tenantId || "default").toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").slice(0, 80);
+  const subject = String(principal.subject || principal.email || "unknown").toLowerCase().replace(/[^a-z0-9_.@-]+/g, "-").slice(0, 120);
+  return `${tenant}.${subject}`;
+}
+
+async function setActiveStorageScope(principal, fallback = "signed-out") {
+  activeStorageScope = storageScopeForPrincipal(principal, fallback);
+  pseudonymKeyCache = null;
+  if (idbApi?.setStorageScope) await idbApi.setStorageScope(activeStorageScope, principal ? backendApi?.storageSessionBinding?.() || "" : "");
+}
+
+function purgeLegacyStorageKeys() {
+  if (typeof localStorage === "undefined") return;
+  PROTECTED_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+}
+
+async function clearActiveClientStorage() {
+  if (typeof localStorage !== "undefined") PROTECTED_STORAGE_KEYS.forEach((key) => localStorage.removeItem(scopedStorageKey(key)));
+  if (idbApi?.clearStorageScope) await idbApi.clearStorageScope();
+  clearCurrentEvidence();
+  state.enrichment = {};
+  state.activeWorkspaceId = "";
 }
 
 function renderWorkspaces() {
@@ -920,7 +1064,7 @@ async function loadGuidedDemo() {
         await saveCaseRecord({
           title: `Demo: ${detection.title}`,
           assignee: "SOC analyst",
-          status: "Triage",
+          status: "Triaged",
           severity: detection.severity,
           notes: `${detection.copy}\n\nResponse guidance: ${detection.response?.[0] || "Review linked evidence."}`,
           linkedDetection: detection.id,
@@ -970,7 +1114,7 @@ async function readFile(file) {
     const text = await readFileText(file);
     els.pasteInput.value = text.slice(0, 70000);
     els.fileMeta.textContent = `${file.name} - ${formatBytes(file.size)}`;
-    runAnalysis(text, file.name);
+    await runAnalysis(text, file.name);
   } catch (error) {
     setStatus(error.message || "File could not be read", "warn");
     setInputMessage(error.message || "File could not be read.");
@@ -980,17 +1124,22 @@ async function readFile(file) {
 }
 
 async function readFileText(file) {
+  if (file.size > MAX_BROWSER_FILE_BYTES) {
+    throw new Error(`Browser uploads are limited to ${formatBytes(MAX_BROWSER_FILE_BYTES)}. Use a managed S3 or CloudWatch source for larger evidence.`);
+  }
   if (file.name.toLowerCase().endsWith(".gz")) {
     if (typeof DecompressionStream === "undefined") {
       throw new Error("This browser cannot decompress .gz files");
     }
     const stream = file.stream().pipeThrough(new DecompressionStream("gzip"));
-    return new Response(stream).text();
+    return readBoundedTextStream(stream, MAX_BROWSER_TEXT_BYTES);
   }
-  return file.text();
+  const text = await file.text();
+  assertBrowserTextSize(text);
+  return text;
 }
 
-function runAnalysis(text, fileName) {
+async function runAnalysis(text, fileName) {
   if (!String(text || "").trim()) {
     setStatus("No log text to analyze", "warn");
     setInputMessage("Paste flow log text or upload a supported evidence file first.");
@@ -1000,6 +1149,7 @@ function runAnalysis(text, fileName) {
   setBusy(true, "Analyzing evidence");
   clearInputMessage();
   try {
+    assertBrowserTextSize(text);
     const parsed = parseVpcFlowLog(text);
     state.records = parsed.records;
     state.filtered = parsed.records;
@@ -1012,7 +1162,7 @@ function runAnalysis(text, fileName) {
     applyBaselineObservations(state.analysis);
     applyDetectionPolicy(state.analysis);
     persistHistory(fileName, state.analysis);
-    persistEvidenceIndexedDb(fileName, parsed.records, state.analysis);
+    const persistence = await persistEvidenceIndexedDb(fileName, parsed.records, state.analysis);
 
     refreshProtocolFilter(parsed.records);
     applyFilters();
@@ -1021,13 +1171,41 @@ function runAnalysis(text, fileName) {
     if (!parsed.records.length) {
       setInputMessage("No records were parsed. Check the field order, delimiter, or pasted text.");
     } else {
-      showToast(`${formatNumber(parsed.records.length)} records analyzed from ${fileName}.`);
+      const retained = persistence.backendRetained ? " and retained" : "";
+      showToast(`${formatNumber(parsed.records.length)} records analyzed${retained} from ${fileName}.`);
     }
   } catch (error) {
     setStatus("Analysis failed", "warn");
     setInputMessage(error.message || "Analysis failed.");
   } finally {
     setBusy(false);
+  }
+}
+
+async function readBoundedTextStream(stream, maxBytes) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error(`Decompressed evidence exceeds the ${formatBytes(maxBytes)} browser analysis limit.`);
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function assertBrowserTextSize(text) {
+  const bytes = new TextEncoder().encode(String(text || "")).byteLength;
+  if (bytes > MAX_BROWSER_TEXT_BYTES) {
+    throw new Error(`Evidence exceeds the ${formatBytes(MAX_BROWSER_TEXT_BYTES)} browser analysis limit. Use an asynchronous managed source import.`);
   }
 }
 
@@ -1247,30 +1425,25 @@ function unwrapJsonLines(text) {
   return sawJson ? messages.join("\n") : String(text || "");
 }
 
-function collectMessages(value) {
-  if (!value) {
-    return [];
-  }
+function collectMessages(value, depth = 0, budget = { remaining: MAX_STRUCTURED_MESSAGES }) {
+  if (!value || depth > MAX_STRUCTURED_DEPTH || budget.remaining <= 0) return [];
   if (typeof value === "string") {
+    budget.remaining -= 1;
     return [value];
   }
   if (Array.isArray(value)) {
-    return value.flatMap(collectMessages);
+    const messages = [];
+    for (const item of value) {
+      if (budget.remaining <= 0) break;
+      messages.push(...collectMessages(item, depth + 1, budget));
+    }
+    return messages;
   }
-  if (typeof value === "object") {
-    if (typeof value.message === "string") {
-      return [value.message];
-    }
-    if (Array.isArray(value.logEvents)) {
-      return value.logEvents.flatMap(collectMessages);
-    }
-    if (value.event) {
-      return collectMessages(value.event);
-    }
-    if (value.record) {
-      return collectMessages(value.record);
-    }
-  }
+  if (typeof value !== "object") return [];
+  if (typeof value.message === "string") return collectMessages(value.message, depth + 1, budget);
+  if (Array.isArray(value.logEvents)) return collectMessages(value.logEvents, depth + 1, budget);
+  if (value.event) return collectMessages(value.event, depth + 1, budget);
+  if (value.record) return collectMessages(value.record, depth + 1, budget);
   return [];
 }
 
@@ -3088,7 +3261,13 @@ async function refreshBackendStatus() {
   try {
     const [health, auth, ai] = await Promise.all([backendApi.backendHealth(), backendApi.authConfig(), backendApi.aiConfig()]);
     state.backend.online = true;
+    state.backend.health = health;
+    state.backend.auth = auth;
+    state.backend.ai = ai;
     state.backend.authMode = health.authMode || auth.authMode || "local-dev";
+    if (idbApi?.setStoragePolicy) {
+      await idbApi.setStoragePolicy({ enabled: health.browserEvidenceCache === "enabled", retentionDays: 7, maxRecords: 50_000 });
+    }
     const store = health.storeMode === "dynamodb" ? "DynamoDB" : "local store";
     els.backendStatusLabel.textContent = health.awsConfigured ? `Backend ready - ${store}, AWS credentials detected` : `Backend ready - ${store}, AWS credentials missing`;
     renderAiStatus(ai, health.awsConfigured);
@@ -3096,13 +3275,20 @@ async function refreshBackendStatus() {
     await renderBackendJobs();
     if (state.backend.principal) {
       await refreshJobRuns(true);
+      await refreshAuditEventsFromBackend(true);
       startJobRunPolling();
     } else {
       stopJobRunPolling();
     }
   } catch {
+    if (state.backend.principal) await clearActiveClientStorage();
     state.backend.online = false;
     state.backend.principal = null;
+    await setActiveStorageScope(null, "offline-local");
+    state.backend.health = null;
+    state.backend.auth = null;
+    state.backend.ai = null;
+    if (idbApi?.setStoragePolicy) await idbApi.setStoragePolicy({ enabled: false, retentionDays: 7, maxRecords: 50_000 });
     stopJobRunPolling();
     els.backendStatusLabel.textContent = "Backend offline - run npm start";
     els.authStatusLabel.textContent = "Backend offline";
@@ -3132,21 +3318,29 @@ async function renderBackendAuth(auth) {
   try {
     const { principal } = await backendApi.currentPrincipal();
     state.backend.principal = principal;
+    await setActiveStorageScope(principal);
     const roles = principal?.roles?.length ? principal.roles.join(", ") : "viewer";
-    els.authStatusLabel.textContent = principal?.authType === "oidc" ? `Signed in as ${principal.name || principal.subject}` : principal?.authType === "api-key" ? "API key session" : "Local admin session";
+    els.authStatusLabel.textContent = principal?.authType === "oidc" ? `Signed in as ${principal.name || principal.subject}` : principal?.authType?.startsWith("api-key") ? "API key session" : "Local admin session";
     els.authRoleLabel.textContent = `Tenant: ${principal?.tenantId || auth.defaultTenant || "default"}. Roles: ${roles}. Admin can delete jobs and export audit; analyst can ingest, export, run AI, and manage cases; viewer can inspect.`;
   } catch {
     state.backend.principal = null;
+    await setActiveStorageScope(null);
     els.authStatusLabel.textContent = auth.enabled ? "SSO required" : "API key required";
-    els.authRoleLabel.textContent = auth.enabled ? `Use ${auth.issuer} and mapped groups for access.` : "Save the backend API key to use cloud ingest and schedules.";
+    els.authRoleLabel.textContent = auth.enabled ? `Use ${auth.issuer} and mapped groups for access.` : "Start an HttpOnly backend session with the API key to use cloud ingest and schedules.";
   }
 }
 
 async function saveBackendApiKey() {
   if (!backendApi) return;
-  backendApi.saveApiKey(els.apiKeyInput.value.trim());
-  showToast(els.apiKeyInput.value.trim() ? "API key saved for this browser." : "API key cleared.");
-  await refreshBackendStatus();
+  try {
+    const key = els.apiKeyInput.value.trim();
+    await backendApi.saveApiKey(key);
+    els.apiKeyInput.value = "";
+    showToast(key ? "Secure backend session started." : "Backend session cleared.");
+    await refreshBackendStatus();
+  } catch (error) {
+    setInputMessage(error.message);
+  }
 }
 
 async function startSsoLogin() {
@@ -3161,7 +3355,10 @@ async function startSsoLogin() {
 
 async function signOutBackend() {
   if (!backendApi) return;
-  backendApi.clearCredentials();
+  await clearActiveClientStorage();
+  await backendApi.clearCredentials();
+  state.backend.principal = null;
+  await setActiveStorageScope(null);
   els.apiKeyInput.value = "";
   showToast("Signed out of backend access.");
   await refreshBackendStatus();
@@ -3657,25 +3854,42 @@ function renderPolicyRecommendations() {
 }
 
 async function persistEvidenceIndexedDb(fileName, records, analysis) {
+  let backendRetained = false;
   if (backendApi) {
     try {
+      let evidenceUpload = null;
+      if (state.backend.online && state.backend.health?.directEvidenceUploads && state.rawEvidenceText) {
+        const safeName = String(fileName || "browser-evidence.log").replace(/[\\/\u0000-\u001f\u007f]/g, "-").slice(0, 240) || "browser-evidence.log";
+        const file = new File([state.rawEvidenceText], safeName, { type: "text/plain" });
+        evidenceUpload = await backendApi.uploadEvidenceFile(file);
+      }
+      const rawEvidenceText = evidenceUpload ? "" : state.rawEvidenceText;
+      const estimatedBytes = new TextEncoder().encode(rawEvidenceText).byteLength;
+      if (!evidenceUpload && estimatedBytes > 512 * 1024) {
+        throw new Error("Direct evidence object storage is required for browser evidence larger than 512 KB");
+      }
       await backendApi.saveEvidenceRun({
         fileName,
         recordCount: records.length,
-        records: records.slice(0, 500),
-        rawEvidenceText: state.rawEvidenceText,
+        records: records.slice(0, evidenceUpload ? 50 : 500),
+        rawEvidenceText,
+        evidenceUploadId: evidenceUpload?.id || "",
         analysis
       });
+      backendRetained = true;
     } catch (error) {
+      if (state.backend.health?.evidenceRetentionRequired) throw new Error(`Required evidence retention failed: ${error.message}`);
       if (state.backend.online) showToast(`Tenant evidence store skipped: ${error.message}`, "warn");
     }
   }
-  if (!idbApi?.saveEvidenceRun) return;
+  if (!idbApi?.saveEvidenceRun) return { backendRetained, browserCached: false };
+  let browserCached = false;
   try {
-    await idbApi.saveEvidenceRun({ fileName, records, analysis });
+    browserCached = Boolean(await idbApi.saveEvidenceRun({ fileName, records, analysis }));
   } catch (error) {
     showToast(`IndexedDB persistence failed: ${error.message}`, "warn");
   }
+  return { backendRetained, browserCached };
 }
 
 function createCaseFromTopDetection() {
@@ -3699,6 +3913,7 @@ async function saveCaseForm() {
   try {
     const record = await saveCaseRecord({
       id: els.caseIdInput.value || undefined,
+      revision: els.caseIdInput.value ? editingCaseRevision : undefined,
       title,
       assignee: els.caseAssigneeInput.value.trim() || "Unassigned",
       status: els.caseStatusInput.value,
@@ -3709,7 +3924,9 @@ async function saveCaseForm() {
       auditDetail: title
     });
     els.caseIdInput.value = record.id;
+    editingCaseRevision = Number(record.revision || 1);
     await refreshCases(record.id);
+    await operationsController?.refreshCaseTasks();
     showToast("Case saved.");
   } catch (error) {
     setInputMessage(error.message);
@@ -3746,6 +3963,7 @@ async function editCase(id) {
   const item = cases.find((caseItem) => caseItem.id === id);
   if (!item) return;
   els.caseIdInput.value = item.id;
+  editingCaseRevision = Number(item.revision || 1);
   els.caseTitleInput.value = item.title;
   els.caseAssigneeInput.value = item.assignee;
   els.caseStatusInput.value = item.status;
@@ -3846,6 +4064,10 @@ function renderTenantAdmin() {
   els.adminTenantLabel.textContent = principal ? `Tenant ${principal.tenantId || "default"} - ${principal.roles?.join(", ") || "viewer"}` : "Backend session required";
   els.adminUserCountLabel.textContent = String(users.length);
   renderAdminSourceOptions(users, sources);
+  renderAdminOpsGrid(users, sources);
+  renderAccessReview(users, sources);
+  renderAuditReview();
+  renderExportApprovals();
   [els.adminUserNameInput, els.adminUserEmailInput, els.adminUserRoleInput, els.adminUserStatusInput, els.adminUserSourceInput, els.sourceOwnerSourceInput, els.sourceOwnerUserInput].forEach((control) => {
     if (control) control.disabled = !canAdmin;
   });
@@ -3886,6 +4108,285 @@ function renderTenantAdmin() {
     : emptyState();
 }
 
+function activeTenantUsers(users = []) {
+  return users.filter((user) => !["disabled", "suspended", "revoked"].includes(String(user.status || "active").toLowerCase()));
+}
+
+function roleCount(users = [], role) {
+  return users.filter((user) => String(user.role || "").toLowerCase() === role && !["disabled", "suspended", "revoked"].includes(String(user.status || "active").toLowerCase())).length;
+}
+
+function buildAccessReview(users = [], sources = []) {
+  const activeUsers = activeTenantUsers(users);
+  const admins = roleCount(users, "admin");
+  const unassignedSources = sources.filter((source) => !source.ownerUserId && !source.ownerName);
+  const disabledUsers = users.filter((user) => ["disabled", "suspended", "revoked"].includes(String(user.status || "").toLowerCase()));
+  const invitedUsers = users.filter((user) => String(user.status || "").toLowerCase() === "invited");
+  const analystsWithoutSources = activeUsers.filter((user) => user.role === "analyst" && sources.length && !(user.sourceIds || []).length);
+  const ownerProblems = sources.filter((source) => {
+    if (!source.ownerUserId) return false;
+    const owner = users.find((user) => user.id === source.ownerUserId);
+    return !owner || !activeTenantUsers([owner]).length;
+  });
+  const staleUsers = users.filter((user) => {
+    const timestamp = Date.parse(user.updatedAt || user.createdAt || "");
+    return Number.isFinite(timestamp) && Date.now() - timestamp > 90 * 24 * 60 * 60 * 1000;
+  });
+  const issues = [
+    {
+      title: "Admin coverage",
+      detail: admins ? `${formatNumber(admins)} active admin${admins === 1 ? "" : "s"} available for privileged actions` : "No active admin users are recorded in the tenant roster",
+      tone: admins ? "ok" : "warn"
+    },
+    {
+      title: "Source ownership",
+      detail: unassignedSources.length ? `${formatNumber(unassignedSources.length)} managed source${unassignedSources.length === 1 ? "" : "s"} need an accountable owner` : "Every managed source has an owner",
+      tone: unassignedSources.length ? "warn" : "ok"
+    },
+    {
+      title: "Analyst scoping",
+      detail: analystsWithoutSources.length ? `${formatNumber(analystsWithoutSources.length)} analyst${analystsWithoutSources.length === 1 ? "" : "s"} have no source scope assigned` : "Analyst source scopes are documented",
+      tone: analystsWithoutSources.length ? "warn" : "ok"
+    },
+    {
+      title: "Owner validity",
+      detail: ownerProblems.length ? `${formatNumber(ownerProblems.length)} source owner assignment${ownerProblems.length === 1 ? "" : "s"} point to missing or disabled users` : "Source owners map to active tenant users",
+      tone: ownerProblems.length ? "warn" : "ok"
+    },
+    {
+      title: "Dormant access",
+      detail: staleUsers.length ? `${formatNumber(staleUsers.length)} roster entr${staleUsers.length === 1 ? "y" : "ies"} have not changed in 90 days` : "No stale roster entries detected",
+      tone: staleUsers.length ? "warn" : "ok"
+    },
+    {
+      title: "Lifecycle cleanup",
+      detail: disabledUsers.length || invitedUsers.length ? `${formatNumber(disabledUsers.length)} disabled and ${formatNumber(invitedUsers.length)} invited users need periodic review` : "No disabled or pending users need cleanup",
+      tone: disabledUsers.length || invitedUsers.length ? "warn" : "ok"
+    }
+  ];
+  return {
+    activeUsers,
+    admins,
+    unassignedSources,
+    disabledUsers,
+    invitedUsers,
+    analystsWithoutSources,
+    ownerProblems,
+    staleUsers,
+    issues
+  };
+}
+
+function renderAdminOpsGrid(users = [], sources = []) {
+  if (!els.adminOpsGrid) return;
+  const review = buildAccessReview(users, sources);
+  const ownerCoverage = sources.length ? Math.round(((sources.length - review.unassignedSources.length) / sources.length) * 100) : 0;
+  els.adminOpsGrid.innerHTML = [
+    metricTemplate("Active users", formatNumber(review.activeUsers.length), `${formatNumber(roleCount(users, "analyst"))} analysts`),
+    metricTemplate("Admins", formatNumber(review.admins), review.admins ? "privileged users" : "coverage gap"),
+    metricTemplate("Owner coverage", `${ownerCoverage}%`, `${formatNumber(sources.length - review.unassignedSources.length)} of ${formatNumber(sources.length)} sources`),
+    metricTemplate("Review items", formatNumber(review.issues.filter((issue) => issue.tone === "warn").length), "access findings")
+  ].join("");
+}
+
+function renderAccessReview(users = loadJson(STORAGE_KEYS.tenantUsers, []), sources = loadJson(STORAGE_KEYS.sources, [])) {
+  if (!els.accessReviewList) return;
+  if (!state.backend.online || !state.backend.principal) {
+    els.accessReviewList.innerHTML = `<div class="empty-state"><strong>Backend session required</strong><span>Sign in as a tenant admin to review RBAC and source accountability.</span></div>`;
+    return;
+  }
+  if (!hasRole("admin")) {
+    els.accessReviewList.innerHTML = `<div class="empty-state"><strong>Admin role required</strong><span>Access reviews include tenant users, source owners, and exportable audit context.</span></div>`;
+    return;
+  }
+  const review = buildAccessReview(users, sources);
+  els.accessReviewList.innerHTML = review.issues.map((issue) => enterpriseIssue(issue.title, issue.detail, issue.tone)).join("");
+}
+
+function exportAccessReview() {
+  if (!hasRole("admin")) return setInputMessage("Admin role is required to export access reviews.");
+  const users = loadJson(STORAGE_KEYS.tenantUsers, []);
+  const sources = loadJson(STORAGE_KEYS.sources, []);
+  const review = buildAccessReview(users, sources);
+  const payload = {
+    product: "SignalPrism NDR",
+    type: "tenant-access-review",
+    exportedAt: new Date().toISOString(),
+    tenantId: state.backend.principal?.tenantId || "default",
+    principal: state.backend.principal ? { subject: state.backend.principal.subject, email: state.backend.principal.email, roles: state.backend.principal.roles } : null,
+    summary: {
+      activeUsers: review.activeUsers.length,
+      admins: review.admins,
+      unassignedSources: review.unassignedSources.length,
+      analystsWithoutSources: review.analystsWithoutSources.length,
+      ownerProblems: review.ownerProblems.length,
+      staleUsers: review.staleUsers.length
+    },
+    findings: review.issues,
+    users: users.map(({ id, name, email, role, status, sourceIds }) => ({ id, name, email, role, status, sourceIds })),
+    sources: sources.map(({ id, name, type, account, region, ownerUserId, ownerName }) => ({ id, name, type, account, region, ownerUserId, ownerName }))
+  };
+  downloadText(`signalprism-access-review-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload, null, 2), "application/json");
+  showToast("Access review exported.");
+}
+
+async function refreshAuditEventsFromBackend(silent = false) {
+  if (!backendApi?.listAuditEvents) {
+    renderAuditReview();
+    return;
+  }
+  if (!state.backend.online || !state.backend.principal || !hasRole("admin")) {
+    renderAuditReview();
+    return;
+  }
+  try {
+    const result = await backendApi.listAuditEvents({ limit: 200 });
+    saveJson(STORAGE_KEYS.auditEvents, result.events || []);
+    renderAuditReview();
+    renderProductionHardening();
+    if (!silent) showToast(`${formatNumber(result.count || 0)} audit events refreshed.`);
+  } catch (error) {
+    if (!silent && state.backend.online) setInputMessage(`Audit events unavailable: ${error.message}`);
+    renderAuditReview();
+  }
+}
+
+function filteredAuditEvents() {
+  const action = String(els.auditActionFilterInput?.value || "").trim().toLowerCase();
+  const actor = String(els.auditActorFilterInput?.value || "").trim().toLowerCase();
+  return loadJson(STORAGE_KEYS.auditEvents, [])
+    .filter((entry) => !action || String(entry.action || "").toLowerCase().includes(action))
+    .filter((entry) => !actor || auditActor(entry).toLowerCase().includes(actor));
+}
+
+function auditActor(entry) {
+  return String(entry.actor || entry.email || entry.subject || entry.principal?.email || entry.principal?.subject || "system");
+}
+
+function auditDetail(entry) {
+  if (entry.detail) return String(entry.detail);
+  const details = entry.details || {};
+  const fields = [details.title, details.name, details.email, details.jobName, details.fileName, details.sourceLabel, details.source, details.destination, details.caseId, details.jobId, details.sourceId, details.workspace, details.format, details.error].filter(Boolean);
+  if (fields.length) return fields.join(" - ");
+  return entry.tenantId ? `Tenant ${entry.tenantId}` : "No additional details recorded";
+}
+
+function renderAuditReview() {
+  if (!els.auditReviewList) return;
+  if (!state.backend.online || !state.backend.principal) {
+    els.auditReviewList.innerHTML = `<div class="empty-state"><strong>Backend session required</strong><span>Tenant audit review is available after signing in with an admin role.</span></div>`;
+    return;
+  }
+  if (!hasRole("admin")) {
+    els.auditReviewList.innerHTML = `<div class="empty-state"><strong>Admin role required</strong><span>Audit records include tenant activity, exports, auth, and ingest actions.</span></div>`;
+    return;
+  }
+  const events = filteredAuditEvents();
+  if (!events.length) {
+    els.auditReviewList.innerHTML = `<div class="empty-state"><strong>No matching audit events</strong><span>Refresh the tenant log or adjust the action and actor filters.</span></div>`;
+    return;
+  }
+  els.auditReviewList.innerHTML = events
+    .slice(0, 50)
+    .map((entry) => {
+      const created = Date.parse(entry.createdAt || "");
+      const retention = entry.retentionUntil ? `Retain until ${entry.retentionUntil.slice(0, 10)}` : "Retention not set";
+      return `<div class="issue-item">
+        <strong>${escapeHtml(entry.action || "audit.event")}</strong>
+        <span>${escapeHtml(auditActor(entry))} - ${escapeHtml(Number.isFinite(created) ? formatDate(created) : "-")} - ${escapeHtml(retention)}</span>
+        <span>${escapeHtml(auditDetail(entry))}</span>
+      </div>`;
+    })
+    .join("");
+}
+
+async function renderExportApprovals() {
+  if (!els.exportApprovalList) return;
+  if (!state.backend.online || !state.backend.principal || (!hasRole("admin") && !hasRole("analyst"))) {
+    els.exportApprovalList.innerHTML = `<div class="empty-state"><strong>Authenticated analyst access required</strong><span>Export requests are tenant-scoped and available after sign-in.</span></div>`;
+    return;
+  }
+  try {
+    const approvals = await backendApi.listExportApprovals();
+    if (!approvals.length) {
+      els.exportApprovalList.innerHTML = `<div class="empty-state"><strong>No export requests</strong><span>Controlled investigation exports will appear here.</span></div>`;
+      return;
+    }
+    els.exportApprovalList.innerHTML = approvals.slice(0, 25).map((approval) => {
+      const canApprove = hasRole("admin") && approval.status === "pending";
+      const canDownload = approval.status === "approved";
+      const action = canApprove
+        ? `<button class="mini-button" type="button" data-approve-export="${escapeHtml(approval.id)}">Approve</button>`
+        : canDownload
+          ? `<button class="mini-button" type="button" data-download-export="${escapeHtml(approval.id)}" data-export-kind="${escapeHtml(approval.kind)}">Download</button>`
+          : "";
+      return `<div class="issue-item">
+        <strong>${escapeHtml(approval.kind === "security-lake" ? "Security Lake export" : "Investigation package")}</strong>
+        <span>${escapeHtml(approval.requestedBy || "unknown")} - ${escapeHtml(approval.status)} - ${escapeHtml(approval.requestedAt ? new Date(approval.requestedAt).toLocaleString() : "")}</span>
+        <span class="mono">SHA-256 ${escapeHtml(String(approval.payloadHash || "").slice(0, 20))}</span>
+        ${action}
+      </div>`;
+    }).join("");
+  } catch (error) {
+    els.exportApprovalList.innerHTML = `<div class="empty-state"><strong>Approval queue unavailable</strong><span>${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+async function approveExportRequest(id) {
+  try {
+    await backendApi.approveExport(id);
+    await renderExportApprovals();
+    showToast("Export request approved for one-time use.");
+  } catch (error) {
+    setInputMessage(error.message);
+  }
+}
+
+async function downloadApprovedExport(id, kind) {
+  try {
+    if (kind === "security-lake") {
+      const lines = [
+        ...buildOcsfNetworkActivity(state.filtered.length ? state.filtered : state.records),
+        ...buildOcsfFindings(state.analysis?.detections || [])
+      ].map((item) => JSON.stringify(item));
+      const payload = lines.join("\n") + "\n";
+      if (!lines.length) throw new Error("There is no current OCSF evidence to export.");
+      const contentSha256 = await sha256Text(payload);
+      const manifest = await backendApi.exportSecurityLakeManifest({ approvalId: id, contentSha256 });
+      if (!manifest.contentSha256 || manifest.contentSha256 !== contentSha256) {
+        throw new Error("Current OCSF evidence does not match the approved export hash.");
+      }
+      downloadText("signalprism-security-lake-ocsf.ndjson", payload, "application/x-ndjson");
+    } else {
+      const result = await backendApi.exportInvestigationPackage({ approvalId: id });
+      downloadText(`signalprism-investigation-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(result, null, 2), "application/json");
+    }
+    await renderExportApprovals();
+    showToast("Approved export downloaded and consumed.");
+  } catch (error) {
+    setInputMessage(error.message);
+  }
+}
+
+async function exportAuditReviewNdjson() {
+  if (!hasRole("admin")) return setInputMessage("Admin role is required to export tenant audit events.");
+  if (backendApi?.exportAuditNdjson && state.backend.online) {
+    try {
+      const text = await backendApi.exportAuditNdjson();
+      downloadText(`signalprism-audit-${new Date().toISOString().slice(0, 10)}.ndjson`, text, "application/x-ndjson");
+      await refreshAuditEventsFromBackend(true);
+      showToast("Tenant audit exported.");
+      return;
+    } catch (error) {
+      setInputMessage(`Audit export failed: ${error.message}`);
+    }
+  }
+  const events = filteredAuditEvents();
+  if (!events.length) return setInputMessage("No cached audit events are available to export.");
+  downloadText(`signalprism-audit-cached-${new Date().toISOString().slice(0, 10)}.ndjson`, events.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "application/x-ndjson");
+  showToast("Cached audit events exported.");
+}
+
 function renderAdminSourceOptions(users, sources) {
   if (!els.adminUserSourceInput || !els.sourceOwnerSourceInput || !els.sourceOwnerUserInput) return;
   els.adminUserSourceInput.innerHTML = sources.map((source) => `<option value="${escapeHtml(source.id)}">${escapeHtml(source.name)}</option>`).join("");
@@ -3912,6 +4413,7 @@ async function saveTenantUser() {
     saveJson(STORAGE_KEYS.tenantUsers, users);
     clearTenantUserForm();
     renderTenantAdmin();
+    await refreshAuditEventsFromBackend(true);
     showToast("Tenant user saved.");
   } catch (error) {
     setInputMessage(error.message);
@@ -3941,6 +4443,7 @@ function deleteTenantUser(id) {
         await backendApi.deleteTenantUser(id);
         saveJson(STORAGE_KEYS.tenantUsers, loadJson(STORAGE_KEYS.tenantUsers, []).filter((user) => user.id !== id));
         renderTenantAdmin();
+        await refreshAuditEventsFromBackend(true);
         showToast("Tenant user deleted.");
       } catch (error) {
         setInputMessage(error.message);
@@ -3961,6 +4464,7 @@ async function assignSourceOwner() {
     saveJson(STORAGE_KEYS.sources, sources);
     renderCoverage();
     renderTenantAdmin();
+    await refreshAuditEventsFromBackend(true);
     showToast("Source owner updated.");
   } catch (error) {
     setInputMessage(error.message);
@@ -3989,19 +4493,52 @@ async function refreshEnterpriseFromBackend() {
     return;
   }
   try {
-    const [settings, rules, artifacts] = await Promise.all([
+    const [settings, rules, artifacts, telemetryEvents, correlations, responseActions, contentBundles, readiness] = await Promise.all([
       backendApi.enterpriseSettings(),
       backendApi.listDetectionRules(),
-      backendApi.listEnterpriseArtifacts ? backendApi.listEnterpriseArtifacts() : Promise.resolve([])
+      backendApi.listEnterpriseArtifacts ? backendApi.listEnterpriseArtifacts() : Promise.resolve([]),
+      backendApi.listTelemetryEvents ? backendApi.listTelemetryEvents() : Promise.resolve([]),
+      backendApi.listCorrelations ? backendApi.listCorrelations() : Promise.resolve([]),
+      backendApi.listResponseActions ? backendApi.listResponseActions() : Promise.resolve([]),
+      backendApi.listDetectionContentBundles ? backendApi.listDetectionContentBundles() : Promise.resolve([]),
+      backendApi.enterpriseReadiness ? backendApi.enterpriseReadiness() : Promise.resolve(null)
     ]);
     saveJson(STORAGE_KEYS.enterpriseSettings, settings);
     saveJson(STORAGE_KEYS.detectionRules, rules.length ? rules : enterpriseDefaultRules());
     applyEnterpriseArtifactsFromBackend(artifacts);
+    state.enterprise = { ...state.enterprise, telemetryEvents, correlations, responseActions, contentBundles, readiness };
   } catch (error) {
     ensureDefaultDetectionRules();
     if (state.backend.online) showToast(`Enterprise sync unavailable: ${error.message}`, "warn");
   }
   renderEnterprise();
+}
+
+async function refreshEnterpriseSecurityOperations(silent = false) {
+  if (!backendApi || !state.backend.online) {
+    if (!silent) showToast("Connect to the backend to refresh enterprise controls.", "warn");
+    renderEnterpriseSecurityOperations([]);
+    return;
+  }
+  if (els.refreshHardeningButton) els.refreshHardeningButton.disabled = true;
+  try {
+    const [telemetryEvents, correlations, responseActions, contentBundles, readiness] = await Promise.all([
+      backendApi.listTelemetryEvents(),
+      backendApi.listCorrelations(),
+      backendApi.listResponseActions(),
+      backendApi.listDetectionContentBundles(),
+      backendApi.enterpriseReadiness()
+    ]);
+    state.enterprise = { ...state.enterprise, telemetryEvents, correlations, responseActions, contentBundles, readiness };
+    const cases = await listCaseRecords().catch(() => []);
+    renderEnterpriseSecurityOperations(cases);
+    renderProductionHardening();
+    if (!silent) showToast("Enterprise deployment posture refreshed.");
+  } catch (error) {
+    if (!silent) showToast(`Enterprise refresh failed: ${error.message}`, "error");
+  } finally {
+    if (els.refreshHardeningButton) els.refreshHardeningButton.disabled = false;
+  }
 }
 
 function applyEnterpriseArtifactsFromBackend(artifacts = []) {
@@ -4099,9 +4636,11 @@ async function renderEnterprise() {
   syncEnterpriseInputs(settings);
   const cases = await listCaseRecords().catch(() => []);
   const readiness = buildEnterpriseReadiness(cases);
-  els.enterpriseReadinessLabel.textContent = `${readiness.score}% enterprise ready`;
+  const deploymentReadiness = state.enterprise.readiness;
+  const displayedScore = deploymentReadiness?.score ?? readiness.score;
+  els.enterpriseReadinessLabel.textContent = `${displayedScore}% enterprise ready`;
   els.enterpriseMetricGrid.innerHTML = [
-    metricTemplate("Readiness", `${readiness.score}%`, readiness.blockers.length ? `${readiness.blockers.length} gaps` : "operational"),
+    metricTemplate("Readiness", `${displayedScore}%`, deploymentReadiness ? `${deploymentReadiness.passed} of ${deploymentReadiness.total} deployment controls` : readiness.blockers.length ? `${readiness.blockers.length} gaps` : "operational"),
     metricTemplate("Source ownership", `${readiness.ownerCoverage}%`, `${formatNumber(readiness.sourcesOwned)} of ${formatNumber(readiness.sourcesTotal)} sources`),
     metricTemplate("Rule coverage", formatNumber(readiness.rulesProduction), `${formatNumber(readiness.rulesTotal)} analytics`),
     metricTemplate("Open incidents", formatNumber(readiness.openCases), `${formatNumber(readiness.highCases)} high severity`),
@@ -4109,6 +4648,9 @@ async function renderEnterprise() {
     metricTemplate("Threat intel", formatNumber(readiness.threatIndicators), "active indicators"),
     metricTemplate("Vault bundles", formatNumber(readiness.vaultBundles), "retained exports")
   ].join("");
+  renderDetectionOperations(cases);
+  renderProductionHardening();
+  renderEnterpriseSecurityOperations(cases);
   renderCitedCopilot();
   renderSourceHealth();
   renderEnterpriseCoverage();
@@ -4130,10 +4672,234 @@ async function renderEnterprise() {
   renderEnterpriseAdminReadiness();
 }
 
+function renderEnterpriseSecurityOperations(cases = []) {
+  renderSignalFusion();
+  renderResponseActions(cases);
+  renderDetectionContentBundles();
+}
+
+function renderSignalFusion() {
+  if (!els.telemetryMetricGrid || !els.correlationList) return;
+  const events = state.enterprise.telemetryEvents || [];
+  const findings = state.enterprise.correlations || [];
+  const formats = new Set(events.map((event) => event.format).filter(Boolean));
+  const high = findings.filter((finding) => ["critical", "high"].includes(finding.severity)).length;
+  const identities = new Set(events.map((event) => event.identity).filter(Boolean));
+  els.telemetryMetricGrid.innerHTML = [
+    metricTemplate("Events", formatNumber(events.length), `${formatNumber(formats.size)} formats`),
+    metricTemplate("Correlations", formatNumber(findings.length), `${formatNumber(high)} high priority`),
+    metricTemplate("Identities", formatNumber(identities.size), "cloud principals and sensors")
+  ].join("");
+  els.correlationList.innerHTML = findings.length
+    ? findings.slice(0, 50).map((finding) => `<div class="issue-item ${["critical", "high"].includes(finding.severity) ? "warning" : ""}">
+        <strong>${escapeHtml(finding.title)} <span class="tag ${tagClass(finding.severity)}">${escapeHtml(finding.severity)}</span></strong>
+        <span>${escapeHtml(finding.summary)} ${escapeHtml(finding.technique || "")} | ${formatNumber(finding.evidenceIds?.length || 0)} evidence events | score ${formatNumber(finding.score)}</span>
+      </div>`).join("")
+    : `<div class="empty-state"><strong>No cross-source findings</strong><span>Ingest CloudTrail, DNS, GuardDuty, Zeek, or Suricata JSON, then run correlation.</span></div>`;
+}
+
+function renderResponseActions(cases = []) {
+  if (!els.responseActionList) return;
+  const actions = state.enterprise.responseActions || [];
+  const correlations = state.enterprise.correlations || [];
+  updateSelectOptions(els.responseCaseInput, [{ value: "", label: "No linked case" }, ...cases.map((item) => ({ value: item.id, label: `${item.title} (${item.status})` }))]);
+  updateSelectOptions(els.responseCorrelationInput, [{ value: "", label: "No linked correlation" }, ...correlations.map((item) => ({ value: item.id, label: `${item.title} - ${item.entity}` }))]);
+  const pending = actions.filter((action) => action.status === "pending").length;
+  const executed = actions.filter((action) => action.status === "executed").length;
+  els.responseActionStatusLabel.textContent = `${formatNumber(pending)} pending | ${formatNumber(executed)} executed`;
+  els.responseActionList.innerHTML = actions.length
+    ? actions.slice(0, 100).map((action) => {
+        const canApprove = action.status === "pending" && hasRole("admin");
+        return `<div class="issue-item ${action.status === "execution-failed" ? "warning" : ""}">
+          <strong>${escapeHtml(responseActionLabel(action.type))} <span class="tag ${action.status === "executed" ? "green" : action.status === "execution-failed" ? "red" : "amber"}">${escapeHtml(action.status)}</span></strong>
+          <span>${escapeHtml(action.target)} | requested by ${escapeHtml(action.requestedBy || "unknown")} | ${escapeHtml(action.reason || "")}</span>
+          ${canApprove ? `<div class="inline-actions"><button class="mini-button" type="button" data-approve-response-action="${escapeHtml(action.id)}">Approve</button></div>` : ""}
+        </div>`;
+      }).join("")
+    : `<div class="empty-state"><strong>No response requests</strong><span>Create a governed action from a validated finding or case.</span></div>`;
+}
+
+function renderDetectionContentBundles() {
+  if (!els.detectionContentList) return;
+  const bundles = state.enterprise.contentBundles || [];
+  const verification = state.enterprise.contentVerification;
+  els.importDetectionContentButton.disabled = !hasRole("admin");
+  els.importDetectionContentButton.title = hasRole("admin") ? "Verify and import this bundle into test status" : "Admin role required";
+  const verificationHtml = verification
+    ? `<div class="issue-item"><strong>Verified ${escapeHtml(verification.name || verification.id)}</strong><span>${escapeHtml(verification.version)} | ${formatNumber(verification.ruleCount)} rules | Ed25519 | ${escapeHtml(String(verification.digest || "").slice(0, 16))}...</span></div>`
+    : "";
+  els.detectionContentList.innerHTML = `${verificationHtml}${bundles.length
+    ? bundles.slice(0, 50).map((bundle) => `<div class="issue-item"><strong>${escapeHtml(bundle.name || bundle.id)} <span class="tag green">verified</span></strong><span>Version ${escapeHtml(bundle.version)} | ${formatNumber(bundle.ruleCount)} rules | imported by ${escapeHtml(bundle.importedBy || "unknown")}</span></div>`).join("")
+    : `<div class="empty-state"><strong>No signed content imported</strong><span>Verify a trusted Ed25519 bundle before importing rules into test status.</span></div>`}`;
+}
+
+function updateSelectOptions(select, options) {
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
+  if (options.some((option) => String(option.value) === selected)) select.value = selected;
+}
+
+function responseActionLabel(type) {
+  return {
+    "isolate-entity": "Isolate entity",
+    "block-ip": "Block IP",
+    "disable-access-key": "Disable access key",
+    "restrict-security-group": "Restrict security group",
+    "quarantine-workload": "Quarantine workload",
+    "revoke-session": "Revoke sessions",
+    "capture-packets": "Request packet capture",
+    "create-ticket": "Create ticket",
+    "notify-soc": "Notify SOC",
+    "rollback-action": "Rollback action"
+  }[type] || type || "Response action";
+}
+
+function loadEnterpriseTelemetrySample() {
+  const base = Date.now() - 10 * 60 * 1000;
+  const iso = (offset) => new Date(base + offset * 1000).toISOString();
+  const events = [];
+  for (let index = 0; index < 6; index += 1) {
+    events.push({ eventVersion: "1.09", eventTime: iso(index * 30), eventSource: "sts.amazonaws.com", eventName: "AssumeRole", awsRegion: "us-east-1", sourceIPAddress: "203.0.113.77", errorCode: "AccessDenied", recipientAccountId: "123456789012", userIdentity: { arn: `arn:aws:iam::123456789012:user/probe-${index}` } });
+  }
+  events.push({ eventVersion: "1.09", eventTime: iso(240), eventSource: "iam.amazonaws.com", eventName: "AttachRolePolicy", awsRegion: "us-east-1", sourceIPAddress: "10.0.1.12", recipientAccountId: "123456789012", userIdentity: { arn: "arn:aws:iam::123456789012:user/compromised-admin" }, requestParameters: { roleName: "ProductionApp", policyArn: "arn:aws:iam::aws:policy/AdministratorAccess" } });
+  events.push({ timestamp: iso(300), event_type: "alert", src_ip: "10.0.1.12", src_port: 49152, dest_ip: "198.51.100.44", dest_port: 443, proto: "TCP", alert: { action: "allowed", severity: 1, category: "Potentially Bad Traffic", signature: "Possible command and control callback" } });
+  events.push({ id: "gd-sample-1", type: "Backdoor:EC2/C&CActivity.B", title: "EC2 instance communicating with a command and control server", severity: 8.2, createdAt: iso(305), updatedAt: iso(305), accountId: "123456789012", region: "us-east-1", resource: { resourceType: "Instance", instanceDetails: { instanceId: "i-0123456789abcdef0", networkInterfaces: [{ privateIpAddress: "10.0.1.12" }] } }, service: { action: { actionType: "NETWORK_CONNECTION", networkConnectionAction: { protocol: "TCP", localIpDetails: { ipAddressV4: "10.0.1.12" }, localPortDetails: { port: 49152 }, remoteIpDetails: { ipAddressV4: "198.51.100.44" }, remotePortDetails: { port: 443 } } } } });
+  for (let index = 0; index < 9; index += 1) events.push({ query_timestamp: iso(330 + index * 10), srcaddr: "10.0.1.12", query_name: `${"a".repeat(62)}${index}.example-cdn.net.`, query_type: "A", transport: "UDP", vpc_id: "vpc-0abc123", region: "us-east-1" });
+  els.telemetryFormatInput.value = "auto";
+  els.telemetryPayloadInput.value = JSON.stringify(events, null, 2);
+  showToast("Loaded a mixed CloudTrail, GuardDuty, Suricata, and Route 53 sample.");
+}
+
+async function ingestEnterpriseTelemetry() {
+  const payload = els.telemetryPayloadInput.value.trim();
+  if (!payload) return showToast("Paste telemetry JSON or load the sample first.", "warn");
+  if (!backendApi?.ingestTelemetry) return showToast("The enterprise telemetry API is unavailable.", "error");
+  els.ingestTelemetryButton.disabled = true;
+  try {
+    const result = await backendApi.ingestTelemetry(els.telemetryFormatInput.value, payload);
+    showToast(`${formatNumber(result.accepted)} telemetry events ingested${result.rejected ? `; ${formatNumber(result.rejected)} rejected` : ""}.`);
+    await refreshEnterpriseSecurityOperations(true);
+  } catch (error) {
+    showToast(`Telemetry ingest failed: ${error.message}`, "error");
+  } finally {
+    els.ingestTelemetryButton.disabled = false;
+  }
+}
+
+async function correlateEnterpriseTelemetry() {
+  if (!backendApi?.runTelemetryCorrelation) return showToast("The telemetry correlation API is unavailable.", "error");
+  els.correlateTelemetryButton.disabled = true;
+  try {
+    const result = await backendApi.runTelemetryCorrelation(60);
+    showToast(`${formatNumber(result.findingCount)} cross-source findings produced from ${formatNumber(result.eventCount)} events.`);
+    await refreshEnterpriseSecurityOperations(true);
+  } catch (error) {
+    showToast(`Correlation failed: ${error.message}`, "error");
+  } finally {
+    els.correlateTelemetryButton.disabled = false;
+  }
+}
+
+async function requestEnterpriseResponseAction() {
+  if (!backendApi?.requestResponseAction) return showToast("The governed response API is unavailable.", "error");
+  els.requestResponseActionButton.disabled = true;
+  try {
+    const action = await backendApi.requestResponseAction({
+      type: els.responseActionTypeInput.value,
+      executionMode: els.responseExecutionModeInput.value,
+      target: els.responseActionTargetInput.value.trim(),
+      reason: els.responseActionReasonInput.value.trim(),
+      caseId: els.responseCaseInput.value,
+      correlationId: els.responseCorrelationInput.value
+    });
+    els.responseActionTargetInput.value = "";
+    els.responseActionReasonInput.value = "";
+    showToast(`${responseActionLabel(action.type)} requested; a separate admin must approve it.`);
+    await refreshEnterpriseSecurityOperations(true);
+  } catch (error) {
+    showToast(`Response request failed: ${error.message}`, "error");
+  } finally {
+    els.requestResponseActionButton.disabled = false;
+  }
+}
+
+function approveEnterpriseResponseAction(id) {
+  confirmAction({
+    title: "Approve governed response?",
+    body: "Approval records your identity and may emit a containment event to the configured automation bus. Downstream responders must honor the action ID for idempotency.",
+    confirmLabel: "Approve Action",
+    onConfirm: async () => {
+      try {
+        const action = await backendApi.approveResponseAction(id);
+        showToast(action.status === "executed" ? "Response action emitted to automation." : "Response action approved; execution remains disabled.");
+        await refreshEnterpriseSecurityOperations(true);
+      } catch (error) {
+        showToast(`Response approval failed: ${error.message}`, "error");
+      }
+    }
+  });
+}
+
+async function verifyEnterpriseDetectionContent() {
+  const bundle = parseDetectionContentInput();
+  if (!bundle) return;
+  els.verifyDetectionContentButton.disabled = true;
+  try {
+    state.enterprise.contentVerification = await backendApi.verifyDetectionContent(bundle);
+    renderDetectionContentBundles();
+    showToast(`Verified ${state.enterprise.contentVerification.ruleCount} signed detection rules.`);
+  } catch (error) {
+    state.enterprise.contentVerification = null;
+    renderDetectionContentBundles();
+    showToast(`Content verification failed: ${error.message}`, "error");
+  } finally {
+    els.verifyDetectionContentButton.disabled = false;
+  }
+}
+
+function importEnterpriseDetectionContent() {
+  const bundle = parseDetectionContentInput();
+  if (!bundle) return;
+  confirmAction({
+    title: "Import signed detection content?",
+    body: "Every rule will enter test status. Production promotion still requires passing evidence and an independent admin approval.",
+    confirmLabel: "Import to Test",
+    onConfirm: async () => {
+      els.importDetectionContentButton.disabled = true;
+      try {
+        const result = await backendApi.importDetectionContent(bundle);
+        saveJson(STORAGE_KEYS.detectionRules, result.rules || []);
+        state.enterprise.contentVerification = result.bundle;
+        showToast(`${formatNumber(result.rules?.length || 0)} signed rules imported into test status.`);
+        await refreshEnterpriseFromBackend();
+      } catch (error) {
+        showToast(`Content import failed: ${error.message}`, "error");
+      } finally {
+        els.importDetectionContentButton.disabled = !hasRole("admin");
+      }
+    }
+  });
+}
+
+function parseDetectionContentInput() {
+  const text = els.detectionContentInput.value.trim();
+  if (!text) {
+    showToast("Paste a signed detection content bundle first.", "warn");
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    showToast("Detection content must be valid JSON.", "error");
+    return null;
+  }
+}
+
 function syncEnterpriseInputs(settings) {
   if (document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) && document.activeElement.closest("#enterprisePanel")) return;
   els.securityLakeBucketInput.value = settings.securityLake?.bucket || "";
-  els.securityLakePrefixInput.value = settings.securityLake?.prefix || "custom/SignalPrismNDR";
+  els.enterpriseSecurityLakePrefixInput.value = settings.securityLake?.prefix || "custom/SignalPrismNDR";
   els.siemTargetInput.value = settings.siem?.target || "Security Lake";
   els.siemEndpointInput.value = settings.siem?.endpoint || "";
   els.retentionDaysInput.value = settings.governance?.evidenceRetentionDays || 90;
@@ -4176,6 +4942,152 @@ function buildEnterpriseReadiness(cases = []) {
     threatIndicators: threatIntel.length,
     vaultBundles: vaultBundles.length
   };
+}
+
+function buildDetectionOperations(cases = []) {
+  const rules = detectionRulesValue();
+  const scoredRules = rules.map((rule) => ({ rule, quality: scoreDetectionRuleQuality(rule) }));
+  const avgQuality = scoredRules.length ? Math.round(scoredRules.reduce((sum, item) => sum + item.quality.score, 0) / scoredRules.length) : 0;
+  const productionRules = rules.filter((rule) => rule.enabled !== false && rule.status === "production");
+  const mappedRules = rules.filter((rule) => rule.attackId);
+  const testedRules = rules.filter((rule) => Number(rule.testCount || 0) > 0);
+  const staleRules = rules.filter((rule) => {
+    const lastTested = Date.parse(rule.lastTestedAt || "");
+    return !Number.isFinite(lastTested) || Date.now() - lastTested > 30 * 24 * 60 * 60 * 1000;
+  });
+  const noisyRules = rules.filter((rule) => Number(rule.testCount || 0) > 100);
+  const detections = state.analysis?.detections || [];
+  const highDetections = detections.filter((detection) => detection.severity === "high").length;
+  const linkedDetectionIds = new Set(cases.map((item) => item.linkedDetection).filter(Boolean));
+  const untriagedDetections = detections.filter((detection) => !linkedDetectionIds.has(detection.id));
+  const openCases = cases.filter((item) => item.status !== "Closed");
+  const failedRuns = loadJson(STORAGE_KEYS.jobRuns, []).filter((run) => String(run.status || "").toLowerCase() === "failed");
+  const score = Math.max(
+    0,
+    Math.min(
+      100,
+      100 -
+        (productionRules.length ? 0 : 18) -
+        (rules.length && mappedRules.length < rules.length ? 10 : 0) -
+        (rules.length && testedRules.length < rules.length ? 12 : 0) -
+        Math.min(staleRules.length * 4, 16) -
+        Math.min(noisyRules.length * 6, 18) -
+        Math.min(untriagedDetections.length * 3, 18) -
+        Math.min(failedRuns.length * 5, 20)
+    )
+  );
+  const issues = [
+    enterpriseIssue("Production analytics", productionRules.length ? `${formatNumber(productionRules.length)} production rules are enabled` : "No production detection rules are enabled", productionRules.length ? "ok" : "warn"),
+    enterpriseIssue("ATT&CK mapping", rules.length && mappedRules.length === rules.length ? "Every detection rule has a technique mapping" : `${formatNumber(mappedRules.length)} of ${formatNumber(rules.length)} rules are mapped`, rules.length && mappedRules.length === rules.length ? "ok" : "warn"),
+    enterpriseIssue("Rule testing", rules.length && testedRules.length === rules.length ? "All rules have passing current-evidence tests" : `${formatNumber(testedRules.length)} of ${formatNumber(rules.length)} rules have test evidence`, rules.length && testedRules.length === rules.length ? "ok" : "warn"),
+    enterpriseIssue("Test freshness", staleRules.length ? `${formatNumber(staleRules.length)} rules need a fresh test run` : "Rule tests are fresh or built-in defaults are current", staleRules.length ? "warn" : "ok"),
+    enterpriseIssue("Triage load", untriagedDetections.length ? `${formatNumber(untriagedDetections.length)} current detections are not linked to cases` : "Current detections are linked or no active detections exist", untriagedDetections.length ? "warn" : "ok"),
+    enterpriseIssue("Import reliability", failedRuns.length ? `${formatNumber(failedRuns.length)} recent async import runs failed` : "No failed async import runs in local history", failedRuns.length ? "warn" : "ok")
+  ];
+  return {
+    score,
+    avgQuality,
+    rulesTotal: rules.length,
+    productionRules: productionRules.length,
+    mappedRules: mappedRules.length,
+    testedRules: testedRules.length,
+    highDetections,
+    untriagedDetections: untriagedDetections.length,
+    openCases: openCases.length,
+    failedRuns: failedRuns.length,
+    noisyRules: noisyRules.length,
+    issues
+  };
+}
+
+function renderDetectionOperations(cases = []) {
+  if (!els.detectionOpsGrid || !els.detectionOpsList) return;
+  const ops = buildDetectionOperations(cases);
+  els.detectionOpsLabel.textContent = `${ops.score}% operating health`;
+  els.detectionOpsGrid.innerHTML = [
+    metricTemplate("Health", `${ops.score}%`, ops.score >= 80 ? "steady state" : "needs review"),
+    metricTemplate("Rule quality", `${ops.avgQuality}%`, `${formatNumber(ops.rulesTotal)} analytics`),
+    metricTemplate("Production", formatNumber(ops.productionRules), `${formatNumber(ops.mappedRules)} mapped`),
+    metricTemplate("Triage", formatNumber(ops.untriagedDetections), `${formatNumber(ops.openCases)} open cases`),
+    metricTemplate("Import failures", formatNumber(ops.failedRuns), "async runs")
+  ].join("");
+  els.detectionOpsList.innerHTML = ops.issues.join("");
+}
+
+function buildProductionHardeningChecks() {
+  const health = state.backend.health || {};
+  const settings = enterpriseSettingsValue();
+  const sources = loadJson(STORAGE_KEYS.sources, []);
+  const users = loadJson(STORAGE_KEYS.tenantUsers, []);
+  const auditEvents = loadJson(STORAGE_KEYS.auditEvents, []);
+  const ownedSources = sources.filter((source) => source.ownerName || source.ownerUserId).length;
+  const sourceCoverage = sources.length ? Math.round((ownedSources / sources.length) * 100) : 0;
+  const authMode = health.authMode || state.backend.authMode || "none";
+  const directIngestReported = Object.prototype.hasOwnProperty.call(health, "directIngestEnabled");
+  return [
+    {
+      title: "Identity boundary",
+      detail: authMode === "oidc" ? "OIDC/SSO is configured for tenant sessions" : authMode === "api-key" ? "API-key sessions are enabled; prefer OIDC/SSO before production" : "Local-dev admin mode is active",
+      tone: authMode === "oidc" ? "ok" : "warn"
+    },
+    {
+      title: "Session protection",
+      detail: health.sessionAuth ? `HttpOnly session auth and CSRF are enabled${health.sessionCookieSecure ? " with Secure cookies" : " without Secure cookie flag"}` : "Session auth state is not reported",
+      tone: health.sessionAuth && (health.sessionCookieSecure || (typeof location !== "undefined" && location.hostname === "localhost")) ? "ok" : "warn"
+    },
+    {
+      title: "Direct ingest boundary",
+      detail: directIngestReported ? (health.directIngestEnabled ? "Direct S3/CloudWatch ingest endpoints are enabled" : "Direct S3/CloudWatch ingest is disabled in favor of managed sources") : "Backend did not report direct ingest posture",
+      tone: directIngestReported && !health.directIngestEnabled ? "ok" : "warn"
+    },
+    {
+      title: "Tenant data store",
+      detail: health.storeMode === "dynamodb" ? "DynamoDB tenant store is active" : "Local JSON store is active; use DynamoDB or Postgres for production",
+      tone: health.storeMode === "dynamodb" ? "ok" : "warn"
+    },
+    {
+      title: "Raw evidence storage",
+      detail: health.evidenceObjectStorage === "s3" ? "Raw evidence packages are stored in S3 object storage" : "Raw evidence packages are retained locally",
+      tone: health.evidenceObjectStorage === "s3" ? "ok" : "warn"
+    },
+    {
+      title: "Audit review",
+      detail: auditEvents.length ? `${formatNumber(auditEvents.length)} tenant audit events cached for review` : "No cached audit events yet; refresh as admin",
+      tone: auditEvents.length ? "ok" : "warn"
+    },
+    {
+      title: "Source accountability",
+      detail: sources.length ? `${sourceCoverage}% of managed sources have owners` : "No managed sources are configured",
+      tone: sources.length && sourceCoverage === 100 ? "ok" : "warn"
+    },
+    {
+      title: "Privileged access",
+      detail: users.length ? `${formatNumber(roleCount(users, "admin"))} admins and ${formatNumber(roleCount(users, "analyst"))} analysts in tenant roster` : "Tenant roster is empty or unavailable",
+      tone: roleCount(users, "admin") ? "ok" : "warn"
+    },
+    {
+      title: "Governance retention",
+      detail: `${formatNumber(settings.governance?.evidenceRetentionDays || 90)} day evidence retention, ${formatNumber(settings.governance?.auditRetentionDays || 2555)} day audit retention`,
+      tone: (settings.governance?.evidenceRetentionDays || 0) >= 90 && (settings.governance?.auditRetentionDays || 0) >= 365 ? "ok" : "warn"
+    },
+    {
+      title: "AI guardrails",
+      detail: health.bedrockEnabled ? "Bedrock assistant is feature-flagged and role-gated" : "Bedrock assistant is disabled by feature flag",
+      tone: health.bedrockEnabled ? "ok" : "warn"
+    }
+  ];
+}
+
+function renderProductionHardening() {
+  if (!els.productionHardeningList) return;
+  if (Array.isArray(state.enterprise.readiness?.checks)) {
+    els.productionHardeningList.innerHTML = state.enterprise.readiness.checks
+      .map((check) => enterpriseIssue(check.name, check.status === "pass" ? "Control is configured." : check.remediation, check.status === "pass" ? "ok" : "warn"))
+      .join("");
+    return;
+  }
+  const checks = buildProductionHardeningChecks();
+  els.productionHardeningList.innerHTML = checks.map((check) => enterpriseIssue(check.title, check.detail, check.tone)).join("");
 }
 
 function renderEnterpriseCoverage() {
@@ -4314,7 +5226,7 @@ function buildSourceHealth(sources = [], jobRuns = [], records = [], errors = []
 
 async function discoverSourcesFromEvidence() {
   if (!state.records.length) return setInputMessage("Analyze evidence before running source discovery.");
-  const discovered = buildDiscoveredSourcesFromEvidence();
+  const discovered = await buildDiscoveredSourcesFromEvidence();
   if (!discovered.length) return setInputMessage("No account, region, or ENI source candidates were found.");
   const current = loadJson(STORAGE_KEYS.sources, []);
   const merged = [...current];
@@ -4338,7 +5250,7 @@ async function discoverSourcesFromEvidence() {
   showToast(`${discovered.length} enterprise source candidate${discovered.length === 1 ? "" : "s"} discovered.`);
 }
 
-function buildDiscoveredSourcesFromEvidence() {
+async function buildDiscoveredSourcesFromEvidence() {
   const groups = new Map();
   state.records.forEach((record) => {
     const account = record.accountId || record.raw?.["account-id"] || "unknown-account";
@@ -4349,9 +5261,9 @@ function buildDiscoveredSourcesFromEvidence() {
     if (record.interfaceId && record.interfaceId !== "-") group.enis.add(record.interfaceId);
     [record.source, record.destination].filter(isPrivateIp).forEach((ip) => group.cidrs.add(`${ip.split(".").slice(0, 2).join(".")}.0.0/16`));
   });
-  return [...groups.values()]
-    .map((group) => ({
-      id: `discovered-${hashText(`${group.account}:${group.region}`).slice(0, 10)}`,
+  return (await Promise.all([...groups.values()]
+    .map(async (group) => ({
+      id: `discovered-${(await sha256Text(`${group.account}:${group.region}`)).slice(0, 32)}`,
       name: `Discovered ${group.account} ${group.region}`,
       type: "AWS Account",
       account: group.account,
@@ -4360,7 +5272,7 @@ function buildDiscoveredSourcesFromEvidence() {
       ownerUserId: "",
       ownerName: "",
       createdAt: new Date().toISOString()
-    }))
+    }))))
     .filter((source) => source.scope.length);
 }
 
@@ -4504,7 +5416,19 @@ function renderDetectionRules() {
   els.detectionRuleCountLabel.textContent = String(rules.length);
   els.detectionRuleList.innerHTML = rules.length
     ? rules
-        .map((rule) => `<article class="entity-card">
+        .map((rule) => {
+          const productionAction = rule.status === "production" ? "Retire" : "Approve";
+          const productionDisabled = rule.builtIn || !state.backend.online || !hasRole("admin") || !["test", "production"].includes(rule.status);
+          const productionReason = rule.builtIn
+            ? "Built-in rules must be cloned before lifecycle changes"
+            : !state.backend.online
+              ? "An authenticated backend is required"
+              : !hasRole("admin")
+                ? "Tenant admin approval is required"
+                : rule.status === "draft"
+                  ? "Run and save a passing test first"
+                  : `${productionAction} this server-governed rule`;
+          return `<article class="entity-card">
           <div class="entity-name">${escapeHtml(rule.name)}</div>
           <div class="risk-score ${riskClass(rule.severity === "high" ? 85 : rule.severity === "medium" ? 45 : 15)}">${escapeHtml(rule.severity[0].toUpperCase())}</div>
           <div class="entity-meta">
@@ -4512,11 +5436,12 @@ function renderDetectionRules() {
             <span class="tag">${escapeHtml(rule.attackId || rule.tactic || "ATT&CK")}</span>
             <button class="mini-button" type="button" data-test-rule="${escapeHtml(rule.id)}">Test</button>
             <button class="mini-button" type="button" data-edit-rule="${escapeHtml(rule.id)}">Edit</button>
-            <button class="mini-button" type="button" data-promote-rule="${escapeHtml(rule.id)}">Promote</button>
+            <button class="mini-button" type="button" data-promote-rule="${escapeHtml(rule.id)}" title="${escapeHtml(productionReason)}" ${productionDisabled ? "disabled" : ""}>${productionAction}</button>
             <button class="mini-button" type="button" data-clone-rule="${escapeHtml(rule.id)}">Clone</button>
             ${rule.builtIn ? "" : `<button class="mini-button danger" type="button" data-delete-rule="${escapeHtml(rule.id)}">Delete</button>`}
           </div>
-        </article>`)
+        </article>`;
+        })
         .join("")
     : emptyState();
 }
@@ -4543,14 +5468,23 @@ function testDetectionRuleForm() {
   els.detectionRuleResultList.innerHTML = renderRuleTestResult(rule, result);
 }
 
-function testDetectionRuleById(id) {
+async function testDetectionRuleById(id) {
   const rule = detectionRulesValue().find((item) => item.id === id);
   if (!rule) return;
   const result = testDetectionRule(rule);
   els.detectionRuleResultList.innerHTML = renderRuleTestResult(rule, result);
-  const updated = { ...rule, testCount: result.count, lastTestedAt: new Date().toISOString(), status: result.count ? rule.status || "test" : "test" };
+  let updated = { ...rule, testCount: result.count, lastTestedAt: new Date().toISOString(), status: rule.status === "production" ? "production" : "test" };
+  if (state.backend.online && !rule.builtIn) {
+    try {
+      updated = await backendApi.saveDetectionRule(updated);
+    } catch (error) {
+      setInputMessage(`Rule test was not saved to the tenant catalog: ${error.message}`);
+      return;
+    }
+  }
   saveDetectionRuleLocal(updated);
   renderDetectionRules();
+  showToast(`Rule test saved with ${formatNumber(result.count)} match${result.count === 1 ? "" : "es"}.`);
 }
 
 function testDetectionRule(rule) {
@@ -4645,24 +5579,19 @@ function deleteDetectionRuleById(id) {
 async function promoteDetectionRule(id) {
   const rule = detectionRulesValue().find((item) => item.id === id);
   if (!rule) return;
-  const quality = scoreDetectionRuleQuality(rule);
-  const nextStatus = rule.status === "production" ? "retired" : rule.status === "test" && quality.score >= 70 ? "production" : "test";
-  const updated = {
-    ...rule,
-    status: nextStatus,
-    version: Number(rule.version || 1) + 1,
-    approvedBy: nextStatus === "production" ? state.backend.principal?.email || "local analyst" : rule.approvedBy || "",
-    approvedAt: nextStatus === "production" ? new Date().toISOString() : rule.approvedAt || "",
-    updatedAt: new Date().toISOString()
-  };
+  if (rule.builtIn) return setInputMessage("Clone a built-in rule before changing its lifecycle.");
+  if (!state.backend.online || !backendApi) return setInputMessage("Production rule lifecycle changes require an authenticated backend.");
+  if (!hasRole("admin")) return setInputMessage("Tenant admin approval is required for production rule lifecycle changes.");
+  if (!["test", "production"].includes(rule.status)) return setInputMessage("Run and save a rule test before requesting production approval.");
+  const nextStatus = rule.status === "production" ? "retired" : "production";
   try {
-    if (backendApi && !updated.builtIn) await backendApi.saveDetectionRule(updated);
+    const updated = await backendApi.promoteDetectionRule(rule.id, nextStatus);
+    saveDetectionRuleLocal(updated);
+    renderEnterprise();
+    showToast(`Rule moved to ${nextStatus}.`);
   } catch (error) {
-    if (state.backend.online) showToast(`Rule promoted locally: ${error.message}`, "warn");
+    setInputMessage(error.message);
   }
-  saveDetectionRuleLocal(updated);
-  renderEnterprise();
-  showToast(`Rule moved to ${nextStatus}.`);
 }
 
 function cloneDetectionRule(id) {
@@ -4768,7 +5697,7 @@ function readEnterpriseSettingsForm() {
     securityLake: {
       ...(current.securityLake || {}),
       bucket: els.securityLakeBucketInput.value.trim(),
-      prefix: els.securityLakePrefixInput.value.trim() || "custom/SignalPrismNDR",
+      prefix: els.enterpriseSecurityLakePrefixInput.value.trim() || "custom/SignalPrismNDR",
       region: "us-east-1",
       format: "ocsf-ndjson"
     },
@@ -4811,6 +5740,7 @@ async function exportSecurityLakeOcsf() {
   const networkEvents = buildOcsfNetworkActivity(state.filtered.length ? state.filtered : state.records);
   const findings = buildOcsfFindings(state.analysis?.detections || []);
   const lines = [...networkEvents, ...findings].map((item) => JSON.stringify(item));
+  const contentSha256 = await sha256Text(lines.join("\n") + "\n");
   const destination = settings.securityLake.bucket ? `s3://${settings.securityLake.bucket}/${settings.securityLake.prefix}` : "manual-download";
   let manifest = {
     id: `security-lake-export-${Date.now()}`,
@@ -4828,12 +5758,20 @@ async function exportSecurityLakeOcsf() {
         destination,
         format: "ocsf-ndjson",
         accountId: [...uniqueRawValues("account-id")][0] || "",
-        region: settings.securityLake.region || "us-east-1"
+        region: settings.securityLake.region || "us-east-1",
+        contentSha256
       });
+      if (manifest.pending) {
+        await renderExportApprovals();
+        showToast("Security Lake export submitted for approval.");
+        return;
+      }
     }
   } catch (error) {
-    if (state.backend.online) showToast(`Security Lake export was downloaded but not audited: ${error.message}`, "warn");
+    if (state.backend.online || settings.governance?.exportApprovalRequired !== false) return setInputMessage(`Security Lake export blocked: ${error.message}`);
   }
+  if (settings.governance?.exportApprovalRequired !== false && !state.backend.online) return setInputMessage("Controlled exports require an authenticated backend approval.");
+  if (manifest.contentSha256 && manifest.contentSha256 !== contentSha256) return setInputMessage("Approved export content no longer matches the reviewed payload.");
   saveJson(STORAGE_KEYS.securityLakeManifest, manifest);
   downloadText("signalprism-security-lake-ocsf.ndjson", lines.join("\n") + "\n", "application/x-ndjson");
   renderEnterprise();
@@ -5207,7 +6145,7 @@ async function createEvidenceVaultBundle() {
   if (!state.records.length && !state.analysis?.detections?.length) return setInputMessage("Analyze evidence before creating a vault bundle.");
   const cases = await listCaseRecords().catch(() => []);
   const settings = enterpriseSettingsValue();
-  const manifest = buildEvidenceVaultManifest({
+  const manifest = await buildEvidenceVaultManifest({
     records: state.records,
     analysis: state.analysis,
     cases,
@@ -5220,11 +6158,11 @@ async function createEvidenceVaultBundle() {
   showToast("Evidence vault bundle created.");
 }
 
-function buildEvidenceVaultManifest({ records = [], analysis = null, cases = [], settings = enterpriseSettingsValue(), source = "" } = {}) {
+async function buildEvidenceVaultManifest({ records = [], analysis = null, cases = [], settings = enterpriseSettingsValue(), source = "" } = {}) {
   const createdAt = new Date().toISOString();
   const retentionDays = Number(settings.governance?.evidenceRetentionDays || 90);
   const retentionUntil = new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000).toISOString();
-  const evidenceHash = hashText(JSON.stringify(records.slice(0, 250)) + JSON.stringify(analysis?.detections || []));
+  const evidenceHash = await sha256Text(JSON.stringify({ records, detections: analysis?.detections || [] }));
   return {
     id: `vault-${Date.now()}`,
     title: `Vault bundle ${new Date().toISOString().slice(0, 10)}`,
@@ -5244,6 +6182,7 @@ function buildEvidenceVaultManifest({ records = [], analysis = null, cases = [],
       cases: cases.length
     },
     evidenceHash,
+    evidenceHashAlgorithm: "SHA-256",
     storage: settings.dataPlatform?.archiveStore || "local evidence vault"
   };
 }
@@ -5449,12 +6388,21 @@ async function exportInvestigationPackage() {
   if (backendApi) {
     try {
       packageBody = await backendApi.exportInvestigationPackage(packageBody);
+      if (packageBody.pending) {
+        await renderExportApprovals();
+        showToast("Investigation export submitted for approval.");
+        return;
+      }
     } catch (error) {
       if (state.backend.online) {
         setInputMessage(`Export blocked by backend policy: ${error.message}`);
         return;
       }
     }
+  }
+  if (enterpriseSettingsValue().governance?.exportApprovalRequired !== false && !state.backend.online) {
+    setInputMessage("Controlled exports require an authenticated backend approval.");
+    return;
   }
   const slug = (workspace?.name || state.fileName || "signalprism-investigation").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
   downloadText(`${slug || "signalprism-investigation"}-package.json`, JSON.stringify(packageBody, null, 2), "application/json");
@@ -5650,49 +6598,89 @@ function exportDetectionsCef() {
   downloadText("ndr-detections.cef", lines.join("\n"), "text/plain");
 }
 
-function exportRedactedRecords() {
+async function exportRedactedRecords() {
   if (!state.records.length) {
     setInputMessage("Analyze evidence before exporting redacted records.");
     return;
   }
-  const rows = state.records.map((record) => ({
-    time: formatDate(record.start),
-    action: record.action,
-    source: redactValue(record.source, "ip"),
-    srcport: record.srcPort || "",
-    destination: redactValue(record.destination, "ip"),
-    dstport: record.dstPort || "",
-    protocol: record.protocol,
-    packets: record.packets,
-    bytes: record.bytes,
-    interfaceId: redactValue(record.interfaceId, "account"),
-    accountId: redactValue(record.accountId, "account"),
-    app: classifyApplication(record)
-  }));
+  const rows = [];
+  for (const record of state.records) {
+    rows.push({
+      time: formatDate(record.start),
+      action: record.action,
+      source: await redactValue(record.source, "ip"),
+      srcport: record.srcPort || "",
+      destination: await redactValue(record.destination, "ip"),
+      dstport: record.dstPort || "",
+      protocol: record.protocol,
+      packets: record.packets,
+      bytes: record.bytes,
+      interfaceId: await redactValue(record.interfaceId, "account"),
+      accountId: await redactValue(record.accountId, "account"),
+      app: classifyApplication(record)
+    });
+  }
   downloadText("ndr-redacted-records.json", JSON.stringify(rows, null, 2), "application/json");
+  showToast("Redacted evidence exported with session-scoped HMAC pseudonyms.");
 }
 
-function redactValue(value, kind) {
+async function redactValue(value, kind) {
   if (!value || value === "-") return value;
   if (kind === "ip" && els.maskIps.checked) {
-    return isPrivateIp(value) || isPublicIp(value) ? `ip-${hashText(value).slice(0, 8)}` : value;
+    return isPrivateIp(value) || isPublicIp(value) ? `ip-${(await pseudonymizeValue(value)).slice(0, 12)}` : value;
   }
   if (kind === "account" && els.maskAccounts.checked) {
-    return String(value).replace(/[a-z0-9-]{6,}/gi, (match) => `id-${hashText(match).slice(0, 8)}`);
+    const matches = [...new Set(String(value).match(/[a-z0-9-]{6,}/gi) || [])];
+    let redacted = String(value);
+    for (const match of matches) redacted = redacted.replaceAll(match, `id-${(await pseudonymizeValue(match)).slice(0, 12)}`);
+    return redacted;
   }
   if (kind === "domain" && els.maskDomains.checked) {
-    return `domain-${hashText(value).slice(0, 8)}`;
+    return `domain-${(await pseudonymizeValue(value)).slice(0, 12)}`;
   }
   return value;
 }
 
-function hashText(text) {
-  let hash = 2166136261;
-  for (let index = 0; index < String(text).length; index += 1) {
-    hash ^= String(text).charCodeAt(index);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+async function sha256Text(text) {
+  if (!globalThis.crypto?.subtle) throw new Error("Web Crypto is required for evidence integrity operations.");
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text)));
+  return bytesToHex(new Uint8Array(digest));
+}
+
+async function pseudonymizeValue(value) {
+  const key = await pseudonymizationKey();
+  const signature = await globalThis.crypto.subtle.sign("HMAC", key, new TextEncoder().encode(String(value)));
+  return bytesToHex(new Uint8Array(signature));
+}
+
+async function pseudonymizationKey() {
+  if (!globalThis.crypto?.subtle || !globalThis.crypto?.getRandomValues) throw new Error("Web Crypto is required for redacted exports.");
+  if (pseudonymKeyCache?.scope === activeStorageScope) return pseudonymKeyCache.key;
+  const storageKey = `signalprism.pseudonym-key.${activeStorageScope}`;
+  let encoded = "";
+  try {
+    encoded = sessionStorage.getItem(storageKey) || "";
+  } catch {
+    // Sandboxed browsers may deny session storage; the key remains memory-only.
   }
-  return (hash >>> 0).toString(16);
+  let raw;
+  if (encoded) {
+    raw = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+  } else {
+    raw = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    try {
+      sessionStorage.setItem(storageKey, btoa(String.fromCharCode(...raw)));
+    } catch {
+      // Memory-only pseudonyms are still safe but will change after a reload.
+    }
+  }
+  const key = await globalThis.crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  pseudonymKeyCache = { scope: activeStorageScope, key };
+  return key;
+}
+
+function bytesToHex(bytes) {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function copyAnalystSummary() {
@@ -5724,8 +6712,9 @@ function escapeCef(value) {
 }
 
 function csvValue(value) {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
+  const text = String(value ?? "").replace(/\r\n?/g, "\n");
+  const neutralized = /^[\t ]*[=+\-@]/.test(text) ? `'${text}` : text;
+  return /[",\n]/.test(neutralized) ? `"${neutralized.replace(/"/g, "\"\"")}"` : neutralized;
 }
 
 function emptyState() {
@@ -5733,7 +6722,7 @@ function emptyState() {
 }
 
 function tagClass(severity) {
-  return severity === "high" ? "red" : severity === "medium" ? "amber" : "green";
+  return severity === "critical" || severity === "high" ? "red" : severity === "medium" ? "amber" : "green";
 }
 
 function riskClass(risk) {
@@ -5859,6 +6848,7 @@ if (typeof module !== "undefined") {
     buildPlaybookSteps,
     buildReplayTimeline,
     buildSourceHealth,
+    csvValue,
     parseThreatIntel,
     scoreDetectionRuleQuality,
     SAMPLE_LOG
