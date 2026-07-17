@@ -59,6 +59,12 @@ npm run visual:test
 Runs the locked Playwright functional and visual regression suite under `tests/visual/`. Install browser binaries once with `npx playwright install chromium webkit`.
 
 ```bash
+npm run browser:test
+```
+
+Runs every browser workflow while ignoring pixel snapshots. CI uses this cross-platform command because font rasterization and full-page height differ across macOS and Linux. Run `visual:test` on the designated baseline platform for reviewed pixel comparisons.
+
+```bash
 npm run visual:update
 ```
 
@@ -170,7 +176,7 @@ Visual regression specs cover:
 - Enterprise signal fusion and governed response workflow.
 - Session-bound AES-GCM IndexedDB evidence caching and wrong-session denial.
 
-They are intentionally separate from `npm run check` so the server and pure-logic test path stays fast. CI runs the browser suite independently in Chromium and WebKit-compatible mobile coverage.
+They are intentionally separate from `npm run check` so the server and pure-logic test path stays fast. CI runs every browser workflow independently in Chromium and WebKit-compatible mobile coverage with snapshots ignored; the designated baseline platform runs the pixel comparison.
 
 ## CI
 
@@ -178,7 +184,7 @@ GitHub Actions runs:
 
 - Locked dependency installation and a high-severity dependency audit.
 - `npm run check` and `npm run build`.
-- Chromium/WebKit functional and visual regression tests.
+- Chromium/WebKit cross-platform functional browser tests, with reviewed visual baselines maintained for the designated snapshot platform.
 - CodeQL and dependency review with pinned action commits and least-privilege workflow permissions.
 
 ## Adding A Detection

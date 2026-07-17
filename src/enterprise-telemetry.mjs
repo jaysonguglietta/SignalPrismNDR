@@ -262,7 +262,7 @@ function detectFormat(record) {
   if (record.operationName && (record.resourceId || record.resourceProviderName || record.subscriptionId)) return "azure-activity";
   if (record.activityDisplayName || record.initiatedBy || record.targetResources) return "entra-audit";
   if (record.connection && (record.src_instance || record.dest_instance || record.reporter)) return "gcp-vpc-flow";
-  if (record.protoPayload || record.logName?.includes("cloudaudit.googleapis.com")) return "gcp-audit";
+  if (record.protoPayload || isGcpAuditLogName(record.logName)) return "gcp-audit";
   if (record.auditID && record.verb && record.objectRef) return "kubernetes-audit";
   if (record.verdict && (record.source?.pod_name || record.destination?.pod_name || record.node_name)) return "cilium-hubble";
   if (record.gigamon || record.ami || record.ipfix || record.exporterAddress) return "gigamon";
@@ -270,6 +270,22 @@ function detectFormat(record) {
   if (record.__format === "aws-vpc-flow" || record.protocolNumber && record.interfaceId && record.logStatus) return "aws-vpc-flow";
   if (record.query_name || record.queryName || record.query_type || record.queryType || record.srcaddr) return "route53-dns";
   return "generic";
+}
+
+function isGcpAuditLogName(value) {
+  const logName = String(value || "");
+  if (!logName || logName.length > 2048) return false;
+  const parts = logName.split("/logs/");
+  if (parts.length !== 2) return false;
+  const scope = parts[0].split("/");
+  if (scope.length !== 2 || !["projects", "organizations", "folders", "billingAccounts"].includes(scope[0]) || !scope[1]) return false;
+  let decodedLogId;
+  try {
+    decodedLogId = decodeURIComponent(parts[1]);
+  } catch {
+    return false;
+  }
+  return decodedLogId.split("/", 1)[0] === "cloudaudit.googleapis.com";
 }
 
 function normalizeFormat(value) {

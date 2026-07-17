@@ -9,6 +9,7 @@ All notable changes to SignalPrism NDR are tracked here.
 - Closed all twelve findings from the 2026-07-17 adversarial review: unified ingest policy, lossless S3 checkpoints, line-isolated parsing, SHA-256 event IDs, immutable detection backtests, governed response targets, fail-closed retention, direct evidence uploads, sealed browser caching, packet provenance, signed scan attestations, and durable stream outbox/replay.
 - Replaced principal-bearing browser cookies with opaque server-side sessions; added OIDC discovery issuer binding, JWKS refresh, strict key eligibility, production MFA step-up, and AWS credential response validation.
 - Added explicit least-privilege source access modes, atomic case/rule transitions, dual-read DynamoDB migration, distributed rate/AI quotas, CSV formula neutralization, and strict invalid-timestamp quarantine.
+- Closed CodeQL findings for authorization-header and tenant-ID regex complexity, dynamic AWS request target validation, one-pass XML entity decoding, and exact GCP audit-log name classification.
 
 - Added server-side session registration and revocation, strict production startup validation, OIDC claim/time validation, CSRF-protected logout, constant-time API-key checks, and bounded per-IP/per-principal rate limiting.
 - Enforced tenant and source ownership for managed ingest, tenant-scoped DynamoDB keys, conditional scheduler/run leases, per-tenant quotas, and fail-closed local persistence.

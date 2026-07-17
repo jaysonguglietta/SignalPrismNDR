@@ -19,6 +19,7 @@
     "advanced:test": "node advanced-operations-test.mjs",
     "readiness:check": "node scripts/enterprise-readiness-check.mjs",
     "ui:test": "node ui-flow-test.mjs",
+    "browser:test": "playwright test --ignore-snapshots",
     "visual:test": "playwright test",
     "visual:update": "playwright test --update-snapshots",
     "security:test": "node integration-test.mjs",

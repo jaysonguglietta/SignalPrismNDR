@@ -2423,8 +2423,14 @@ function requiredPermissionForRequest(req) {
 }
 
 function parseBearer(header = "") {
-  const match = String(header).match(/^Bearer\s+(.+)$/i);
-  return match?.[1] || "";
+  const value = String(header);
+  if (value.length < 8 || value.length > 16_384 || value.slice(0, 7).toLowerCase() !== "bearer ") return "";
+  const token = value.slice(7);
+  for (let index = 0; index < token.length; index += 1) {
+    const code = token.charCodeAt(index);
+    if (code <= 32 || code === 127) return "";
+  }
+  return token;
 }
 
 async function verifyOidcToken(token) {
@@ -2507,10 +2513,33 @@ function tenantFromClaims(payload) {
 
 function sanitizeTenantId(value, namespace = "signalprism") {
   const raw = String(value || DEFAULT_TENANT).trim() || DEFAULT_TENANT;
-  if (/^[a-z0-9](?:[a-z0-9_.-]{0,78}[a-z0-9])?$/.test(raw)) return raw;
-  const slug = raw.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "tenant";
+  if (isTenantIdentifier(raw)) return raw;
+  let slug = "";
+  for (const character of raw.toLowerCase()) {
+    const code = character.charCodeAt(0);
+    const allowed = (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || character === "_" || character === "." || character === "-";
+    if (allowed) slug += character;
+    else if (slug && slug.at(-1) !== "-") slug += "-";
+    if (slug.length >= 48) break;
+  }
+  while (slug.startsWith("-")) slug = slug.slice(1);
+  while (slug.endsWith("-")) slug = slug.slice(0, -1);
+  slug ||= "tenant";
   const digest = createHash("sha256").update(`${namespace}\0${raw}`).digest("hex").slice(0, 20);
   return `${slug}-${digest}`.slice(0, 80);
+}
+
+function isTenantIdentifier(value) {
+  if (!value || value.length > 80 || !isLowerAlphaNumeric(value[0]) || !isLowerAlphaNumeric(value.at(-1))) return false;
+  for (const character of value) {
+    if (!isLowerAlphaNumeric(character) && character !== "_" && character !== "." && character !== "-") return false;
+  }
+  return true;
+}
+
+function isLowerAlphaNumeric(character) {
+  const code = character?.charCodeAt(0) || 0;
+  return (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
 }
 
 async function getJwks({ forceRefresh = false } = {}) {
@@ -6170,7 +6199,7 @@ async function awsJsonRequest({ service, region, target, payload, credentials })
 
 async function awsRequest({ service, region, method, host, path, query = {}, headers = {}, body = "", credentials }) {
   region = validateAwsRegion(region);
-  validateAwsHost(service, region, host);
+  host = validateAwsHost(service, region, host);
   const bodyBuffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
   credentials = credentials || await getAwsCredentials();
   const signed = createSignedAwsRequest({
@@ -6186,7 +6215,11 @@ async function awsRequest({ service, region, method, host, path, query = {}, hea
     headers,
     body: bodyBuffer
   });
-  const response = await fetch(signed.url, {
+  const target = new URL(signed.url);
+  if (target.protocol !== "https:" || target.port || target.username || target.password || target.hostname !== host || !target.hostname.endsWith(".amazonaws.com")) {
+    throw new Error("Signed AWS request target is not allowed");
+  }
+  const response = await fetch(target, {
     method,
     headers: signed.headers,
     body: ["GET", "HEAD"].includes(method) ? undefined : bodyBuffer,
@@ -6305,7 +6338,8 @@ function validateAwsCredentials(credentials) {
 }
 
 function decodeXml(value) {
-  return value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&apos;/g, "'");
+  const entities = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" };
+  return String(value || "").replace(/&(amp|lt|gt|quot|apos);/g, (_, entity) => entities[entity]);
 }
 
 function validateAwsRegion(value) {
@@ -6353,6 +6387,7 @@ function validateAwsHost(service, region, host) {
     valid = value.endsWith(`.${region}.aoss.amazonaws.com`) && value.length > `.${region}.aoss.amazonaws.com`.length;
   }
   if (!valid) throw new Error("AWS endpoint is not allowed");
+  return value;
 }
 
 function validateHotSearchEndpoint(value, mode, region) {

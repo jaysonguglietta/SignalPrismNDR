@@ -109,7 +109,7 @@ npx playwright install chromium webkit
 npm run visual:test
 ```
 
-The locked Playwright dependency, functional browser flows, and portable desktop/mobile visual baselines are included in the repository.
+The locked Playwright dependency, functional browser flows, and desktop/mobile visual baselines are included in the repository. Use `npm run browser:test` for cross-platform functional CI; pixel comparison uses `npm run visual:test` on the designated baseline platform to avoid operating-system font rasterization noise.
 
 Build the dependency-free distributable with:
 

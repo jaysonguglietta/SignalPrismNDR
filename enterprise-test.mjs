@@ -60,6 +60,11 @@ const canonicalA = parseTelemetryPayload([{ timestamp: iso(600), sourceIp: "10.0
 const canonicalB = parseTelemetryPayload([{ action: "connect", destinationIp: "198.51.100.1", sourceIp: "10.0.0.1", timestamp: iso(600) }]);
 assert.equal(canonicalA.events[0].id, canonicalB.events[0].id, "event identity must not depend on JSON property order");
 
+const gcpAudit = parseTelemetryPayload([{ timestamp: iso(601), logName: "projects/prod-1/logs/cloudaudit.googleapis.com%2Factivity", severity: "NOTICE" }]);
+assert.equal(gcpAudit.events[0].format, "gcp-audit");
+const deceptiveGcpAudit = parseTelemetryPayload([{ timestamp: iso(602), logName: "https://attacker.example/cloudaudit.googleapis.com", action: "connect" }]);
+assert.equal(deceptiveGcpAudit.events[0].format, "generic");
+
 const findings = correlateTelemetry(normalized.events, { windowMinutes: 60 });
 assert.ok(findings.some((finding) => finding.ruleId === "SP-CORR-001"), "authentication spray should correlate");
 assert.ok(findings.some((finding) => finding.ruleId === "SP-CORR-002"), "privilege and network activity should correlate");
