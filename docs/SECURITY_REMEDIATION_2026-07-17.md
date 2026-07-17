@@ -33,7 +33,7 @@ This record closes the twelve production-blocking findings in the 2026-07-17 dee
 - CSV exports neutralize spreadsheet formulas, normalize carriage returns, and retain proper CSV quoting.
 - Invalid OCSF timestamps are rejected or quarantined instead of being silently replaced with the current time. Native OCSF 1.8 and Security Lake 1.3 remain separate profiles.
 - The Docker base image is pinned by multi-architecture digest. CI pins actions, runs dependency review and CodeQL, and Dependabot covers npm, Actions, and Docker.
-- CodeQL follow-up removed polynomial regex paths from authorization and tenant parsing, made the AWS HTTPS/hostname boundary explicit immediately before `fetch`, converted XML entity decoding to one pass, and requires an exact structured GCP audit-log service identifier.
+- CodeQL follow-up removed polynomial regex paths from authorization and tenant parsing, converted S3 to fixed allowlisted regional hosts with encoded bucket paths, made the AWS HTTPS/hostname boundary explicit immediately before `fetch`, converted XML entity decoding to one pass, and requires an exact structured GCP audit-log service identifier.
 
 ## Validation Commands
 

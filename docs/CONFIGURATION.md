@@ -165,6 +165,8 @@ Local AWS calls use:
 
 ECS/Fargate deployments should use task roles. The backend supports ECS container credentials through the standard credential endpoint variables.
 
+AWS calls accept only the commercial and GovCloud regions in the server's static endpoint allowlist. S3 uses the fixed `s3.<region>.amazonaws.com` endpoint with the validated bucket in the encoded path, so tenant-selected bucket names never control outbound DNS. Add newly launched regions through a reviewed code change before using them.
+
 ## OIDC/SSO
 
 | Variable | Default | Purpose |

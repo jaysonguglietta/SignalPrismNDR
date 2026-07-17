@@ -3016,7 +3016,7 @@ async function ingestS3({ region, bucket, prefix = "", maxObjects = 10, roleArn 
     const query = { "list-type": "2", prefix, "max-keys": String(Math.min(1000, targetCount - objects.length)) };
     if (continuationToken) query["continuation-token"] = continuationToken;
     else if (lastKey) query["start-after"] = lastKey;
-    const listed = await awsRequest({ service: "s3", region, method: "GET", host: `${bucket}.s3.${region}.amazonaws.com`, path: "/", query, credentials });
+    const listed = await awsRequest({ service: "s3", region, method: "GET", host: s3Host(region), path: s3Path(bucket), query, credentials });
     const pageObjects = parseS3ListObjects(listed.body);
     for (const object of pageObjects) {
       lastKey = object.key > lastKey ? object.key : lastKey;
@@ -3039,8 +3039,8 @@ async function ingestS3({ region, bucket, prefix = "", maxObjects = 10, roleArn 
       service: "s3",
       region,
       method: "GET",
-      host: `${bucket}.s3.${region}.amazonaws.com`,
-      path: `/${encodePath(key)}`,
+      host: s3Host(region),
+      path: s3Path(bucket, key),
       credentials
     });
     const raw = Buffer.from(object.raw);
@@ -4667,8 +4667,8 @@ async function persistEvidencePackage(run, body = {}, principal = {}) {
       service: "s3",
       region: EVIDENCE_REGION,
       method: "PUT",
-      host: `${EVIDENCE_BUCKET}.s3.${EVIDENCE_REGION}.amazonaws.com`,
-      path: `/${encodePath(key)}`,
+      host: s3Host(EVIDENCE_REGION),
+      path: s3Path(EVIDENCE_BUCKET, key),
       headers,
       body: payload
     });
@@ -5240,7 +5240,7 @@ async function createPacketAccessUrl(manifestId, grantId, principal) {
   const reference = parseS3Reference(manifest.objectUri);
   assertPacketObjectAllowed(reference);
   const credentials = await getAwsCredentials();
-  const presigned = createPresignedAwsUrl({ ...credentials, service: "s3", region: EVIDENCE_REGION, method: "GET", host: `${validateS3Bucket(reference.bucket)}.s3.${EVIDENCE_REGION}.amazonaws.com`, path: `/${encodePath(reference.prefix)}`, query: manifest.versionId ? { versionId: manifest.versionId } : {}, headers: {}, expiresSeconds: Math.max(60, Math.min(900, Math.floor((Date.parse(grant.expiresAt) - Date.now()) / 1000))) });
+  const presigned = createPresignedAwsUrl({ ...credentials, service: "s3", region: EVIDENCE_REGION, method: "GET", host: s3Host(EVIDENCE_REGION), path: s3Path(reference.bucket, reference.prefix), query: manifest.versionId ? { versionId: manifest.versionId } : {}, headers: {}, expiresSeconds: Math.max(60, Math.min(900, Math.floor((Date.parse(grant.expiresAt) - Date.now()) / 1000))) });
   return { mode: "presigned-get", url: presigned.url, expiresAt: presigned.expiresAt, sha256: manifest.sha256, versionId: manifest.versionId, bytes: manifest.bytes, packetCount: manifest.packetCount };
 }
 
@@ -5255,8 +5255,8 @@ async function verifyPacketManifestObject(manifest, principal = {}) {
     service: "s3",
     region: EVIDENCE_REGION,
     method: "HEAD",
-    host: `${reference.bucket}.s3.${EVIDENCE_REGION}.amazonaws.com`,
-    path: `/${encodePath(reference.prefix)}`,
+    host: s3Host(EVIDENCE_REGION),
+    path: s3Path(reference.bucket, reference.prefix),
     query: manifest.versionId ? { versionId: manifest.versionId } : {},
     headers: { "x-amz-checksum-mode": "ENABLED" }
   });
@@ -5337,8 +5337,8 @@ async function createEvidenceUpload(body, principal) {
     service: "s3",
     region: EVIDENCE_REGION,
     method: "PUT",
-    host: `${validateS3Bucket(stagingBucket)}.s3.${EVIDENCE_REGION}.amazonaws.com`,
-    path: `/${encodePath(key)}`,
+    host: s3Host(EVIDENCE_REGION),
+    path: s3Path(stagingBucket, key),
     headers: signedHeaders,
     expiresSeconds: DIRECT_UPLOAD_TTL_SECONDS
   });
@@ -5376,7 +5376,7 @@ async function completeEvidenceUpload(id, body, principal) {
   if (!upload) throw publicError("Evidence upload not found", 404);
   if (upload.status !== "pending") throw publicError("Evidence upload is already complete or expired", 409);
   if (Date.now() >= Date.parse(upload.expiresAt || 0)) throw publicError("Evidence upload session expired", 409);
-  const response = await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "HEAD", host: `${validateS3Bucket(upload.bucket)}.s3.${EVIDENCE_REGION}.amazonaws.com`, path: `/${encodePath(upload.key)}`, headers: { "x-amz-checksum-mode": "ENABLED" } });
+  const response = await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "HEAD", host: s3Host(EVIDENCE_REGION), path: s3Path(upload.bucket, upload.key), headers: { "x-amz-checksum-mode": "ENABLED" } });
   const actualLength = Number(response.headers.get("content-length") || 0);
   const actualChecksum = response.headers.get("x-amz-checksum-sha256") || "";
   const stagingVersionId = response.headers.get("x-amz-version-id") || "";
@@ -5439,7 +5439,7 @@ async function finalizeEvidenceUpload(upload, principal) {
   let vaultVersionId = upload.stagingVersionId || "";
   if (upload.bucket !== upload.vaultBucket || upload.key !== upload.vaultKey) {
     const copySource = `/${upload.bucket}/${encodePath(upload.key)}${upload.stagingVersionId ? `?versionId=${encodeURIComponent(upload.stagingVersionId)}` : ""}`;
-    const copyResponse = await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "PUT", host: `${validateS3Bucket(upload.vaultBucket)}.s3.${EVIDENCE_REGION}.amazonaws.com`, path: `/${encodePath(upload.vaultKey)}`, headers: {
+    const copyResponse = await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "PUT", host: s3Host(EVIDENCE_REGION), path: s3Path(upload.vaultBucket, upload.vaultKey), headers: {
       "x-amz-copy-source": copySource,
       "x-amz-object-lock-mode": EVIDENCE_OBJECT_LOCK_MODE,
       "x-amz-object-lock-retain-until-date": upload.retentionUntil,
@@ -5447,13 +5447,13 @@ async function finalizeEvidenceUpload(upload, principal) {
       ...(upload.legalHold ? { "x-amz-object-lock-legal-hold": "ON" } : {})
     } });
     vaultVersionId = copyResponse.headers.get("x-amz-version-id") || "";
-    const vaultHead = await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "HEAD", host: `${validateS3Bucket(upload.vaultBucket)}.s3.${EVIDENCE_REGION}.amazonaws.com`, path: `/${encodePath(upload.vaultKey)}`, query: vaultVersionId ? { versionId: vaultVersionId } : {}, headers: { "x-amz-checksum-mode": "ENABLED" } });
+    const vaultHead = await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "HEAD", host: s3Host(EVIDENCE_REGION), path: s3Path(upload.vaultBucket, upload.vaultKey), query: vaultVersionId ? { versionId: vaultVersionId } : {}, headers: { "x-amz-checksum-mode": "ENABLED" } });
     const vaultChecksum = vaultHead.headers.get("x-amz-checksum-sha256") || "";
     const expectedChecksum = Buffer.from(upload.sha256, "hex").toString("base64");
     const vaultLength = Number(vaultHead.headers.get("content-length") || 0);
     vaultVersionId = vaultHead.headers.get("x-amz-version-id") || vaultVersionId;
     if (!vaultVersionId || !vaultChecksum || !constantTimeEqual(vaultChecksum, expectedChecksum) || vaultLength !== upload.actualLength) throw publicError("Retained evidence object verification failed", 503);
-    await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "DELETE", host: `${validateS3Bucket(upload.bucket)}.s3.${EVIDENCE_REGION}.amazonaws.com`, path: `/${encodePath(upload.key)}`, query: upload.stagingVersionId ? { versionId: upload.stagingVersionId } : {} });
+    await awsRequest({ service: "s3", region: EVIDENCE_REGION, method: "DELETE", host: s3Host(EVIDENCE_REGION), path: s3Path(upload.bucket, upload.key), query: upload.stagingVersionId ? { versionId: upload.stagingVersionId } : {} });
   }
   const now = new Date().toISOString();
   const completed = { ...upload, bucket: upload.vaultBucket, key: upload.vaultKey, uri: upload.vaultUri, versionId: vaultVersionId, status: "complete", completedAt: now, updatedAt: now, completedBy: actorIdentity(principal) };
@@ -5787,8 +5787,8 @@ async function persistAuditObject(entry) {
     service: "s3",
     region: AUDIT_REGION,
     method: "PUT",
-    host: `${AUDIT_BUCKET}.s3.${AUDIT_REGION}.amazonaws.com`,
-    path: `/${encodePath(key)}`,
+    host: s3Host(AUDIT_REGION),
+    path: s3Path(AUDIT_BUCKET, key),
     headers: {
       "content-type": "application/json",
       "x-amz-object-lock-mode": AUDIT_OBJECT_LOCK_MODE,
@@ -6321,6 +6321,15 @@ function encodePath(key) {
   return key.split("/").map(encodeURIComponent).join("/");
 }
 
+function s3Host(region) {
+  return `s3.${validateAwsRegion(region)}.amazonaws.com`;
+}
+
+function s3Path(bucket, key = "") {
+  const bucketPath = encodeURIComponent(validateS3Bucket(bucket));
+  return key ? `/${bucketPath}/${encodePath(key)}` : `/${bucketPath}`;
+}
+
 function normalizeIssuer(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
@@ -6344,8 +6353,45 @@ function decodeXml(value) {
 
 function validateAwsRegion(value) {
   const region = String(value || "").trim().toLowerCase();
-  if (!/^[a-z]{2}(?:-[a-z0-9]+)+-\d$/.test(region) || region.length > 32) throw new Error("AWS region is invalid");
-  return region;
+  switch (region) {
+    case "af-south-1": return "af-south-1";
+    case "ap-east-1": return "ap-east-1";
+    case "ap-east-2": return "ap-east-2";
+    case "ap-northeast-1": return "ap-northeast-1";
+    case "ap-northeast-2": return "ap-northeast-2";
+    case "ap-northeast-3": return "ap-northeast-3";
+    case "ap-south-1": return "ap-south-1";
+    case "ap-south-2": return "ap-south-2";
+    case "ap-southeast-1": return "ap-southeast-1";
+    case "ap-southeast-2": return "ap-southeast-2";
+    case "ap-southeast-3": return "ap-southeast-3";
+    case "ap-southeast-4": return "ap-southeast-4";
+    case "ap-southeast-5": return "ap-southeast-5";
+    case "ap-southeast-6": return "ap-southeast-6";
+    case "ap-southeast-7": return "ap-southeast-7";
+    case "ca-central-1": return "ca-central-1";
+    case "ca-west-1": return "ca-west-1";
+    case "eu-central-1": return "eu-central-1";
+    case "eu-central-2": return "eu-central-2";
+    case "eu-north-1": return "eu-north-1";
+    case "eu-south-1": return "eu-south-1";
+    case "eu-south-2": return "eu-south-2";
+    case "eu-west-1": return "eu-west-1";
+    case "eu-west-2": return "eu-west-2";
+    case "eu-west-3": return "eu-west-3";
+    case "il-central-1": return "il-central-1";
+    case "me-central-1": return "me-central-1";
+    case "me-south-1": return "me-south-1";
+    case "mx-central-1": return "mx-central-1";
+    case "sa-east-1": return "sa-east-1";
+    case "us-east-1": return "us-east-1";
+    case "us-east-2": return "us-east-2";
+    case "us-gov-east-1": return "us-gov-east-1";
+    case "us-gov-west-1": return "us-gov-west-1";
+    case "us-west-1": return "us-west-1";
+    case "us-west-2": return "us-west-2";
+    default: throw new Error("AWS region is invalid or unsupported by the endpoint allowlist");
+  }
 }
 
 function validateS3Bucket(value) {
@@ -6372,9 +6418,7 @@ function validateAwsHost(service, region, host) {
   const value = String(host || "").toLowerCase();
   let valid = false;
   if (service === "s3") {
-    const suffix = `.s3.${region}.amazonaws.com`;
-    valid = value.endsWith(suffix) && value.slice(0, -suffix.length).length > 0;
-    if (valid) validateS3Bucket(value.slice(0, -suffix.length));
+    valid = value === `s3.${region}.amazonaws.com`;
   } else if (["logs", "dynamodb", "sqs", "events", "firehose", "kinesis", "sts", "securitylake", "scheduler"].includes(service)) {
     valid = value === `${service}.${region}.amazonaws.com`;
   } else if (service === "organizations") {
