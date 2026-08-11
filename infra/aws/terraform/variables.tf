@@ -155,6 +155,17 @@ variable "response_execution_enabled" {
   default     = false
 }
 
+variable "response_verifier_subjects" {
+  type        = list(string)
+  description = "Stable OIDC or service-account subjects allowed to independently verify response outcomes."
+  default     = []
+
+  validation {
+    condition     = alltrue([for subject in var.response_verifier_subjects : length(trimspace(subject)) >= 3 && length(subject) <= 512])
+    error_message = "response_verifier_subjects entries must contain 3 to 512 characters."
+  }
+}
+
 variable "response_archive_retention_days" {
   type        = number
   description = "Retention for approved response events in the EventBridge archive."

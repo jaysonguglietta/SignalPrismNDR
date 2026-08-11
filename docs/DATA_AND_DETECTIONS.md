@@ -182,6 +182,22 @@ Current cross-source rules identify:
 
 Every correlation carries source formats and evidence IDs. Correlations are investigation leads, not automatic containment decisions.
 
+## Browser Event Stitching
+
+`src/event-stitching.mjs` provides a deterministic browser correlation path for files selected together. It emits source-namespaced normalized event IDs and joins events through bounded time plus one or more of:
+
+- Authenticated identity or cloud resource.
+- Workload or network interface.
+- Community ID or source session ID.
+- Source/destination path continuation.
+- IP address or normalized DNS name.
+
+Strong identifiers receive more weight than IP or domain evidence. Confidence also reflects temporal proximity, independent source provenance, cross-format corroboration, and complementary categories such as identity followed by network activity. Every retained link includes its confidence, relationship, shared entities, and human-readable reasons.
+
+Connected risk-bearing events become ordered incident chains only when at least two independently named evidence sources participate. Chains include severity, urgency score, confidence, ATT&CK-oriented stages, primary entities, source formats, event timeline, links, and coverage gaps.
+
+Safety controls include tenant mismatch rejection, cross-account weak-network-entity rejection, common IP/domain suppression, invalid-time quarantine, bounded candidate history, configurable windows, minimum confidence, event/link/chain limits, and explicit conflict reporting. These controls reduce unsafe joins from NAT, shared resolvers, common services, duplicated private ranges, clock problems, and broad time windows. The model proposes investigative association and does not claim causality.
+
 ## Behavior, Campaign, And Retrospective Analytics
 
 Behavior profiles group evidence by resolved entity and compare recent activity with deterministic historical features. Findings cover new peers/services, off-hours behavior, three-sigma volume deviation, periodic beacon candidates, and repeated failures. Every finding includes the triggering feature values and evidence IDs.
@@ -219,6 +235,18 @@ Topology replay uses normalized record timestamps to build a cutoff view of enti
 
 Enterprise replay export creates a JSON incident reconstruction timeline that overlays flow events with detection milestones.
 
+## Investigation Heatmaps
+
+`src/network-heatmap.mjs` projects the replay snapshot into three bounded investigative models:
+
+- Activity: time buckets by entity, `/24` subnet, account, destination port, protocol, or evidence source.
+- Matrix: source-to-destination cells by entity, subnet, account, or evidence source.
+- Geographic: imported public-IP coordinates, communication arcs, unresolved endpoint counts, and explicit approximate-location flags.
+
+Cell metrics are flow count, bytes, rejects, deterministic risk weight, or linked detection evidence. Color can use linear or logarithmic scaling. Evidence scope can include all replayed flows, records linked to detections, or records linked to stitched incident chains. A selection is represented as a time/group range, source/destination pair, or IP and is applied consistently to raw records, detections, the entity graph, recent replay events, and stitched events.
+
+Models cap activity rows and columns, matrix groups, geographic edges, and per-cell evidence indexes. Exports remove internal record indexes and include only a bounded normalized evidence sample. The renderer never calls an external geolocation service.
+
 ## Enrichment Model
 
 Accepted enrichment fields:
@@ -235,8 +263,12 @@ Accepted enrichment fields:
 - `app`
 - `category`
 - `ai`
+- `latitude` or `lat`
+- `longitude`, `lon`, or `lng`
+- `country`, `region`, and `city`
+- `geoSource` and `geoPrecision`
 
-Enrichment is stored in browser storage and can be included in tenant workspace snapshots.
+Enrichment is stored in browser storage and can be included in tenant workspace snapshots. Geographic coordinates are treated as approximate unless `geoPrecision` is `exact`. Documentation-range TEST-NET addresses receive clearly marked demonstration coordinates; other unresolved public IPs remain unmapped.
 
 ## Export Formats
 
@@ -246,11 +278,28 @@ Enrichment is stored in browser storage and can be included in tenant workspace 
 - CEF for legacy SIEM ingestion.
 - Redacted JSON for privacy-aware sharing using session-scoped HMAC-SHA256 pseudonyms.
 - Investigation package JSON for complete case handoff. Backend-enabled exports are RBAC-controlled, audited, separately approved, expiring, and one-time by default.
+- Heatmap-view JSON with visualization options, replay position, selection, bounded aggregate summary, and selected normalized evidence. Controlled-export policy applies.
 - Backend audit NDJSON.
 - Detection-as-code JSON.
 - Investigation graph JSON.
 - Replay timeline JSON.
 - Security Lake OCSF NDJSON with approval bound to the payload SHA-256.
+- Executive brief PDF, formula-neutralized CSV, and JSON with report integrity metadata and controlled-export policy.
+
+## Executive Urgency And Reporting
+
+`src/executive-reporting.mjs` groups equivalent detections by normalized title, tactic, and technique, then deduplicates linked evidence by source, time, endpoints, ports, and protocol. The 100-point ranking is bounded as follows:
+
+- Severity: 25.
+- Confidence: 15.
+- Known asset criticality: 15.
+- Public or sensitive exposure: 10.
+- Entity breadth: 10.
+- Event velocity: 10.
+- Threat-intelligence match: 10.
+- Open-case assignment and SLA pressure: 5.
+
+Missing asset ownership, criticality, source health, or prior-period data is represented as `Unknown`; it is not converted into risk. Current and prior windows are non-overlapping. Executive reports remove raw evidence rows, retain finding and metric citations, record caveats and context coverage, and add a browser-calculated SHA-256 before persistence or export.
 
 ## Enterprise Artifacts
 
@@ -261,6 +310,9 @@ The backend stores advanced workflow outputs as tenant-scoped `EnterpriseArtifac
 - `PLAYBOOK_RUN`: case-linked response steps.
 - `EVIDENCE_VAULT_BUNDLE`: retention and chain-of-custody manifest.
 - `ENTERPRISE_REPORT`: analyst, executive, compliance, or manager report.
+- `EXECUTIVE_BRIEF`: evidence-cited leadership report snapshot.
+- `REPORT_SCHEDULE`: admin-only tenant-inbox schedule; schedule metadata is not visible to viewers.
+- `REPORT_DELIVERY`: admin-created delivery bound to an existing schedule and its exact tenant recipient list.
 
 The raw evidence package is not the same as the analyst investigation package. Evidence packages are retention-oriented source artifacts; investigation packages are bounded handoff artifacts.
 

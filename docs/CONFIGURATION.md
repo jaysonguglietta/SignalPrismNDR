@@ -15,6 +15,7 @@ SignalPrism NDR is configured with environment variables. Start with `.env.examp
 | `NDR_PRODUCTION_HARDENING` | `false` | Enables fail-closed startup checks for auth, HTTPS cookies, OIDC transport, and dedicated secrets. |
 | `NDR_SESSION_SECRET` | API key/client secret/runtime random | HMAC secret for opaque session IDs. Production requires a dedicated 32+ character value. |
 | `NDR_SESSION_TTL_SECONDS` | `28800` | Maximum server-side session lifetime. |
+| `NDR_OIDC_SESSION_TTL_SECONDS` | production `900`, otherwise session TTL | Maximum OIDC-backed session lifetime before fresh IdP authentication. |
 | `NDR_SESSION_COOKIE_SECURE` | `false` | Adds the `Secure` cookie flag. Set `true` behind HTTPS. Terraform enables it when an ACM certificate is configured. |
 | `NDR_SESSION_REGISTRY_REQUIRED` | `true` | Requires tenant-stored session presence for revocation and role/status changes. |
 | `NDR_EVIDENCE_ATTESTATION_SECRET` | session secret fallback | HMAC key for server evidence attestation. Production requires a separate 32+ character value. |
@@ -37,7 +38,12 @@ SignalPrism NDR is configured with environment variables. Start with `.env.examp
 | `NDR_MAX_JOB_INTERVAL_MINUTES` | `10080` | Maximum schedule interval. |
 | `NDR_EXPORT_APPROVAL_TTL_SECONDS` | `900` | Approved export consumption window. |
 | `NDR_MAX_PENDING_EXPORT_APPROVALS` | `100` | Maximum unexpired pending export requests per tenant. |
+| `NDR_MAX_EXPORT_APPROVAL_BYTES` | `262144` | Maximum serialized export body accepted for approval. |
+| `NDR_EXPORT_PAYLOAD_BUCKET` | evidence staging bucket | Encrypted short-lived S3 storage for approval payloads; required in production. |
+| `NDR_EXPORT_PAYLOAD_PREFIX` | `signalprism/export-approvals` | Tenant-bound object prefix for approval payloads. |
+| `NDR_EXPORT_PAYLOAD_REGION` | evidence region | AWS region for approval payload storage. |
 | `NDR_REQUIRE_SEPARATE_APPROVER` | `true` | Prohibits export requester/rule author self-approval. |
+| `NDR_RESPONSE_VERIFIER_SUBJECTS` | empty | Comma-separated stable subjects permitted to verify response outcomes; required when production execution is enabled. |
 | `NDR_STEP_UP_REQUIRED` | `false` | Requires recent OIDC MFA for packet access, controlled export approval, and response approval. Production hardening forces this on. |
 | `NDR_STEP_UP_MAX_AGE_SECONDS` | `900` | Maximum age of the OIDC `auth_time` accepted for a privileged approval. |
 | `NDR_AUDIT_RETENTION_DAYS` | `2555` | Retention metadata stamped onto audit records. |
@@ -91,6 +97,8 @@ When `NDR_EVIDENCE_BUCKET` is set, the bucket must have S3 Object Lock enabled b
 | `NDR_DDB_TABLE` | empty | DynamoDB table name when using `dynamodb`. |
 | `NDR_DDB_REGION` | AWS region env or `us-east-1` | DynamoDB region. |
 | `NDR_DDB_GSI_MIGRATION_MODE` | `dual-read` | `dual-read`, `gsi-only`, or `legacy-only`; keep `dual-read` until schema-v2 backfill and completeness verification finish. |
+| `NDR_MAX_TELEMETRY_EVENTS_PER_DAY` | `1000000` | Atomic per-tenant daily normalized-event quota. |
+| `NDR_TELEMETRY_RETENTION_DAYS` | `30` | TTL applied to normalized hot/warm telemetry metadata. Raw evidence follows its separate retention policy. |
 
 Local mode stores:
 
@@ -181,11 +189,15 @@ AWS calls accept only the commercial and GovCloud regions in the server's static
 | `NDR_REQUIRE_OIDC_TENANT_CLAIM` | `true` | Reject OIDC tokens that do not contain `NDR_TENANT_CLAIM` or an accepted tenant fallback claim. |
 | `NDR_OIDC_CLOCK_SKEW_SECONDS` | `60` | Allowed clock skew for issued-at, expiration, and not-before checks. |
 | `NDR_OIDC_TOKEN_USE` | empty | Optional provider-specific expected `token_use`/type. |
+| `NDR_TENANT_DIRECTORY_REQUIRED` | production `true` | Rejects OIDC principals without an active tenant-directory record bound to issuer and subject. |
+| `NDR_ALLOW_DIRECTORY_EMAIL_MATCH` | `false` | Development-only migration fallback for directory matching. Ignored by production hardening. |
 | `NDR_ADMIN_GROUP` | `ndr-admin` | IdP group mapped to `admin`. |
 | `NDR_ANALYST_GROUP` | `ndr-analyst` | IdP group mapped to `analyst`. |
 | `NDR_VIEWER_GROUP` | `ndr-viewer` | IdP group mapped to `viewer`. |
 | `NDR_DEFAULT_TENANT` | `default` | Tenant used for API-key and local-dev sessions. |
 | `NDR_TENANT_CLAIM` | `tenant_id` | OIDC claim used to resolve tenant ownership. |
+
+Production directory records must carry the IdP `subject` and, when multiple issuers are possible, `issuer`. Email remains display/contact data and is not an authorization identity. Session requests reapply current directory status, roles, permissions, and source scope; production OIDC sessions require fresh authentication after 15 minutes by default.
 
 Tokens must be RS256 signed. The backend checks issuer, audience/authorized party, subject, issued-at, expiry, not-before, tenant claim, redirect URI, and JWKS signature.
 

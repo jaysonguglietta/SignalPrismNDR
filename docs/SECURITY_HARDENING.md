@@ -67,13 +67,16 @@ Do not approve production deployment until all are true:
 
 - `NDR_PRODUCTION_HARDENING=true`, `NODE_ENV=production`, `NDR_SESSION_COOKIE_SECURE=true`.
 - OIDC is configured with an HTTPS issuer, exact audience, tenant claim, and reviewed group mappings. Any API key is randomly generated and rotated.
+- OIDC users are bound to active tenant-directory records by normalized issuer and immutable subject. Email matching is disabled, directory policy is reapplied on every session request, and production OIDC session lifetime is bounded.
 - Session and evidence attestation secrets are separate Secrets Manager values with rotation ownership.
 - `NDR_STORE=dynamodb`; PITR, SSE, TTL, `kind-createdAt-index`, and tenant-bounded `tenant-kind-createdAt-index` are enabled.
 - `NDR_DDB_GSI_MIGRATION_MODE=dual-read` remains in place until schema-v2 backfill completeness is proven; conditional case/rule transitions have passed race tests.
 - `NDR_QUEUE_URL` is configured, API and worker process roles are separate, queue-age/DLQ alarms notify an owned SNS topic, and a DLQ redrive drill has passed.
 - `NDR_DETECTION_CONTENT_PUBLIC_KEY_B64` contains the approved public key; private signing keys are absent from runtime and Terraform state.
 - Response execution remains disabled until EventBridge targets have scope validation, least-privilege roles, rollback behavior, and action-ID deduplication.
+- Response verification uses a third step-up-authenticated admin whose stable subject appears in `NDR_RESPONSE_VERIFIER_SUBJECTS`; requesters and approvers cannot attest outcomes.
 - Audit Object Lock is COMPLIANCE, evidence retention mode is approved, and `NDR_AUDIT_OBJECT_STORAGE_REQUIRED=true`.
+- Export approval bodies are stored in the encrypted staging bucket with digest verification, bounded size, three-day lifecycle cleanup, one-time consumption, and best-effort immediate deletion.
 - The ALB has ACM HTTPS, WAF, restricted ingress CIDRs, access logs, deletion protection, and alarm destinations.
 - The ECS image is pinned by digest, scan results are accepted, the task is non-root/read-only, and task-role permissions are scoped to approved flow-log, model, and storage ARNs.
 - Private subnets have controlled HTTPS egress and the selected VPC resolver. Production plans reject `0.0.0.0/0` HTTPS egress unless the operator explicitly records that risk acceptance. Prefer VPC endpoints for S3, DynamoDB, CloudWatch Logs, ECR, Secrets Manager, SQS, KMS, and EventBridge.

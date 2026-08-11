@@ -84,6 +84,9 @@ locals {
     { name = "NDR_AUDIT_OBJECT_STORAGE_REQUIRED", value = "true" },
     { name = "NDR_EVIDENCE_BUCKET", value = aws_s3_bucket.evidence.bucket },
     { name = "NDR_EVIDENCE_STAGING_BUCKET", value = aws_s3_bucket.evidence_staging.bucket },
+    { name = "NDR_EXPORT_PAYLOAD_BUCKET", value = aws_s3_bucket.evidence_staging.bucket },
+    { name = "NDR_TENANT_DIRECTORY_REQUIRED", value = var.environment == "prod" ? "true" : "false" },
+    { name = "NDR_OIDC_SESSION_TTL_SECONDS", value = var.environment == "prod" ? "900" : "28800" },
     { name = "NDR_EVIDENCE_SCAN_REQUIRED", value = "true" },
     { name = "NDR_EVIDENCE_STORAGE_REQUIRED", value = "true" },
     { name = "NDR_EVIDENCE_CHECKSUM_REQUIRED", value = "true" },
@@ -125,6 +128,7 @@ locals {
     { name = "NDR_REQUIRE_DURABLE_QUEUE", value = "true" },
     { name = "NDR_RESPONSE_EVENT_BUS", value = aws_cloudwatch_event_bus.response.name },
     { name = "NDR_RESPONSE_EXECUTION_ENABLED", value = tostring(var.response_execution_enabled) },
+    { name = "NDR_RESPONSE_VERIFIER_SUBJECTS", value = join(",", var.response_verifier_subjects) },
     { name = "NDR_DETECTION_CONTENT_PUBLIC_KEY_B64", value = var.detection_content_public_key_b64 },
     { name = "NDR_FIREHOSE_STREAM_NAME", value = "" },
     { name = "NDR_FIREHOSE_NETWORK_STREAM_NAME", value = aws_kinesis_firehose_delivery_stream.ocsf["network_activity"].name },
@@ -1525,6 +1529,10 @@ resource "aws_ecs_task_definition" "app" {
     precondition {
       condition     = var.environment != "prod" || length(var.evidence_scanner_subjects) > 0
       error_message = "Production requires at least one dedicated evidence_scanner_subjects identity."
+    }
+    precondition {
+      condition     = var.environment != "prod" || !var.response_execution_enabled || length(var.response_verifier_subjects) > 0
+      error_message = "Production response execution requires at least one independent response_verifier_subjects identity."
     }
     precondition {
       condition     = !var.organization_discovery_enabled || var.organization_external_id != ""

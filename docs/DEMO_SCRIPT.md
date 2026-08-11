@@ -20,6 +20,9 @@ Show:
 - Managed AWS sources.
 - Overview metrics.
 - Priority entities.
+- Top 10 findings ranked by explainable urgency.
+
+Select `Explain` on the first ranked finding, walk through the score factors, then select `View evidence` to show the exact records behind the ranking.
 
 ## 3. Explain The First Detection
 
@@ -75,13 +78,25 @@ Say:
 
 > This is the enterprise layer: governance, repeatable detection content, retained artifacts, and response workflows around the investigation.
 
-## 8. Use AI Assistance
+## 8. Generate The Executive Brief
+
+Open `Reports`, generate the 30-day executive brief, and show:
+
+- Risk posture and prior-period delta.
+- Current, previous, change, and interpretation columns.
+- `[F#]` finding and `[M#]` metric citations.
+- Coverage caveats and unknown asset context.
+- Governed PDF, CSV, and JSON export actions.
+
+Create a weekly tenant-inbox schedule and run it once to show the downloadable delivery.
+
+## 9. Use AI Assistance
 
 Open `Reports`.
 
 Show Bedrock prompt presets. If Bedrock is disabled, point out the disabled state and explain the feature flag. If enabled, run `Top risk explanation`.
 
-## 9. Export Package
+## 10. Export Package
 
 Select `Package`.
 
@@ -89,7 +104,7 @@ Say:
 
 > The package is a portable investigation handoff: detections, observations, top entities, managed sources, cases, summaries, AI output, and bounded evidence samples.
 
-## 10. Close With Deployment
+## 11. Close With Deployment
 
 Summarize:
 

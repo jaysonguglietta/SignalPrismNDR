@@ -136,6 +136,8 @@ The Terraform ALB listener redirects HTTP to HTTPS when `certificate_arn` is set
 
 Terraform sets `NDR_SESSION_COOKIE_SECURE=true`, server-side session registration, separate-approver governance, managed-source-only ingest, production startup checks, and bounded tenant quotas. Session and evidence-attestation secret ARNs are required inputs.
 
+Production also sets `NDR_TENANT_DIRECTORY_REQUIRED=true`, limits OIDC sessions to 15 minutes, stores export approval bodies in the KMS-encrypted evidence staging bucket, and refuses local persistence or non-immutable audit configuration. Populate tenant users with their stable IdP subject before enabling SSO. When response execution is enabled, configure `response_verifier_subjects` with independent verifier identities.
+
 Production also enables distributed DynamoDB rate counters, recent MFA step-up for privileged approvals, fail-closed evidence storage/checksum/scan attestation, packet object provenance verification, durable stream retry settings, and daily Bedrock/agent budgets.
 
 ## Persistence Deployment Patterns
