@@ -31,6 +31,6 @@
     "check": "node --check app.js && node --check server.mjs && node --check src/aws-sigv4.mjs && node --check src/aws-queue.mjs && node --check src/enterprise-telemetry.mjs && node --check src/enterprise-analytics.mjs && node --check src/event-stitching.mjs && node --check src/network-heatmap.mjs && node --check src/executive-reporting.mjs && node --check src/advanced-operations.mjs && node --check src/ocsf.mjs && node --check src/connector-catalog.mjs && node --check src/platform-ui.mjs && node --check src/operations-ui.mjs && node --check integration-test.mjs && node --check enterprise-test.mjs && node --check event-stitching-test.mjs && node --check network-heatmap-test.mjs && node --check executive-reporting-test.mjs && node --check platform-test.mjs && node --check advanced-operations-test.mjs && node --check ui-flow-test.mjs && node smoke-test.js && node enterprise-test.mjs && node event-stitching-test.mjs && node network-heatmap-test.mjs && node executive-reporting-test.mjs && node platform-test.mjs && node advanced-operations-test.mjs && node integration-test.mjs && node ui-flow-test.mjs && node scripts/enterprise-readiness-check.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1"
+    "@playwright/test": "1.62.1"
   }
 }
