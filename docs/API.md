@@ -328,11 +328,11 @@ Request:
 
 ### `GET /api/enterprise/artifacts`
 
-Protected. Requires `admin`, `analyst`, or `viewer`. Returns tenant enterprise artifacts. Use the optional `type` query parameter to filter artifacts such as `COPILOT_NOTE`, `THREAT_INTEL`, `PLAYBOOK_RUN`, `EVIDENCE_VAULT_BUNDLE`, or `ENTERPRISE_REPORT`.
+Protected. Requires `admin`, `analyst`, or `viewer`. Returns visible tenant enterprise artifacts. Use the optional `type` query parameter to filter artifacts such as `COPILOT_NOTE`, `THREAT_INTEL`, `PLAYBOOK_RUN`, `EVIDENCE_VAULT_BUNDLE`, `ENTERPRISE_REPORT`, or `EXECUTIVE_BRIEF`. `REPORT_SCHEDULE` records are admin-only. `REPORT_DELIVERY` records are visible to admins and named tenant recipients. `Restricted` executive briefs require analyst or admin access.
 
 ### `POST /api/enterprise/artifacts`
 
-Protected. Requires `admin` or `analyst`. Saves a tenant-scoped enterprise artifact and writes an audit event. This endpoint supports advanced workflows without creating a separate route per artifact type.
+Protected. Requires `admin` or `analyst`. Saves a tenant-scoped enterprise artifact and writes an audit event. `REPORT_SCHEDULE` and `REPORT_DELIVERY` are additionally restricted to admins and receive server-side schedule, tenant, classification, and recipient validation. A delivery must reference an existing same-tenant schedule and use its exact recipient set.
 
 Request:
 
@@ -401,6 +401,8 @@ Protected. Requires `admin`.
 ### `POST /api/exports/investigation`
 
 Protected. Requires `admin` or `analyst`. When tenant export approval is enabled, the first request returns `202` with a pending approval. A second request with an approved `approvalId` consumes the time-limited approval once and returns the server-stored reviewed payload with tenant/export metadata. Requests beyond the tenant pending-approval quota return `429`.
+
+Executive reports use the same endpoint with `reportType: "executive-brief"`, `format: "pdf" | "csv" | "json"`, and a same-tenant `report` object. The approval queue exposes the report purpose and format but never returns the report payload.
 
 ### `POST /api/exports/security-lake`
 
@@ -579,7 +581,7 @@ Requires `admin` or `analyst`. Accepts up to 1,000 events per request as JSON, J
 }
 ```
 
-`GET /api/telemetry/events` is available to all tenant roles and supports an optional `format` query parameter.
+Assigned/group-scoped identities must include a managed `sourceId`; the backend verifies ownership before persistence. `GET /api/telemetry/events` is available to tenant roles but returns only records whose complete source provenance is authorized for the principal. Unscoped derived records fail closed.
 
 ### `POST /api/telemetry/correlate`
 
@@ -643,7 +645,7 @@ Native streaming defaults to the `native-current` OCSF 1.8 profile. Security Lak
 - `POST /api/threat-intel/retromatch`: `admin` or `analyst`; matches active indicators against historical event fields and persists sightings.
 - `GET|POST /api/case-tasks`: tenant read and analyst write; manages case tasks, assignees, watchers, due dates, and escalation policy.
 - `GET|POST /api/pipeline-policy`, `/api/exposure-context`, `/api/regional-cells`, `/api/provider-workspaces`, and `/api/notification-policies`: tenant read and admin write for enforced deduplication/masking/tiering, vulnerability/IAM/route/security-group context, residency/failover, MDR workspace, and notification resources.
-- `GET|POST /api/agent/evaluations`: tenant read and analyst write; scores citations, unsupported claims, approval-gated tools, and tenant scope.
+- `GET|POST /api/agent/evaluations`: source-scoped tenant read and analyst write. POST accepts only `{ "runId": "<persisted AI run>" }` plus an optional policy; inline client-supplied runs are rejected and the evaluation records the immutable run digest.
 
 Telemetry formats also include `azure-nsg`, `azure-activity`, `entra-audit`, `gcp-vpc-flow`, `gcp-audit`, `kubernetes-audit`, `cilium-hubble`, `gigamon`, and `extrahop`. CEF lines are normalized as Gigamon-compatible sensor records.
 
@@ -683,7 +685,7 @@ Only Secrets Manager ARNs may be stored as connector secret references. Connecto
 ### Response lifecycle
 
 - `GET /api/response-adapters`: lists supported intent adapters.
-- `POST /api/response-actions/{id}/verify`: stores validation outcome and evidence.
+- `POST /api/response-actions/{id}/verify`: step-up admin action for an independent verifier. The requester and approver are rejected; production execution can restrict verification to `NDR_RESPONSE_VERIFIER_SUBJECTS`.
 - `POST /api/response-actions/{id}/rollback`: `admin`; creates a separately approved rollback action for reversible adapters.
 
 Response requests accept `executionMode` (`dry-run` or `enforce`), `expiresInMinutes`, and optional `rollbackPlan`. New intents include `restrict-security-group`, `quarantine-workload`, `revoke-session`, and time-bounded `capture-packets` requests.

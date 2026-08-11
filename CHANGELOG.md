@@ -6,6 +6,15 @@ All notable changes to SignalPrism NDR are tracked here.
 
 ### Security
 
+- Extended source ownership through telemetry, derived analytics, hunts, workspaces, cases, evidence, packet manifests, response, AI, jobs, stream delivery, and export paths; unscoped records now fail closed for restricted identities.
+- Replaced mutable email/name dual-control checks with issuer/subject identity keys, required independent response verification, and disabled production directory email matching.
+- Changed SQS contracts to identifiers only so workers reload authoritative jobs and sources; queue-carried job configuration and principals are rejected.
+- Moved cloud export-approval bodies out of DynamoDB into encrypted short-lived S3 objects with bounded size, SHA-256 verification, one-time consumption, TTL, and deletion.
+- Added cost-weighted endpoint throttling, atomic daily telemetry quotas, telemetry TTL, asynchronous bounded gzip decompression, path-only request logging, persisted-run-only agent evaluation, and optimistic artifact revisions.
+- Production startup now requires DynamoDB, immutable S3 audit writes, tenant-directory OIDC membership, and short-lived export payload storage.
+
+- Added type-specific executive-report artifact authorization, tenant-label validation, exact schedule-recipient binding, restricted-report visibility, sealed approval metadata, one-time export consumption, and spreadsheet-formula neutralization.
+
 - Closed all twelve findings from the 2026-07-17 adversarial review: unified ingest policy, lossless S3 checkpoints, line-isolated parsing, SHA-256 event IDs, immutable detection backtests, governed response targets, fail-closed retention, direct evidence uploads, sealed browser caching, packet provenance, signed scan attestations, and durable stream outbox/replay.
 - Replaced principal-bearing browser cookies with opaque server-side sessions; added OIDC discovery issuer binding, JWKS refresh, strict key eligibility, production MFA step-up, and AWS credential response validation.
 - Added explicit least-privilege source access modes, atomic case/rule transitions, dual-read DynamoDB migration, distributed rate/AI quotas, CSV formula neutralization, and strict invalid-timestamp quarantine.
@@ -22,6 +31,14 @@ All notable changes to SignalPrism NDR are tracked here.
 
 ### Added
 
+- Added an evidence-linked Top 10 findings workspace with duplicate consolidation, period/source/severity/environment filters, non-overlapping trend windows, owner/status context, eight explainable urgency factors, and raw-record drill-through.
+- Added governed executive security briefs with risk posture, seven period-over-period metrics, `[F#]`/`[M#]` citations, explicit unknown context, deterministic or bounded Bedrock-assisted narrative, SHA-256 integrity, PDF/CSV/JSON export, admin-managed schedules, and downloadable tenant-inbox deliveries.
+- Added deterministic model tests, API authorization/approval tests, functional browser workflows, and desktop/mobile visual regression baselines for executive operations and reporting.
+
+- Added synchronized zoomable activity, communication-matrix, and geographic investigation heatmaps with replay-aware aggregation, entity/subnet/account/port/protocol/source grouping, five metrics, linear/log scaling, detection and stitched-evidence scopes, keyboard and pointer drill-down, Shift+drag brushing, contextual filtering, governed export, bounded rendering, analyst-supplied geolocation, and desktop/mobile regression coverage.
+- Added browser-native multi-source event stitching for flow logs, CloudTrail, GuardDuty, Route 53, Zeek, Suricata, OCSF, and generic JSON with automatic format arbitration, normalized provenance, ordered attack chains, confidence-scored link explanations, analyst-selectable policies, coverage gaps, blocked ambiguous joins, governed exports, tests, and a five-source demo bundle.
+- Added simultaneous drag-and-drop for up to 20 independently parsed evidence files, per-record source provenance, partial-failure isolation, source filtering and hunting, per-file quality status, and provenance-aware CSV and investigation exports.
+- Added a deterministic large AWS VPC Flow Log demo pack with clean baseline, ransomware campaign, mixed SOC, and telemetry-quality datasets plus ground-truth manifests.
 - Added an in-product analyst learning center with an NDR lifecycle, telemetry limitations, severity-versus-urgency guidance, live workflow links, an investigation playbook, a glossary, guided-demo practice, and desktop/mobile regression coverage.
 
 - Added multi-cloud, Kubernetes, Cilium, Gigamon/IPFIX/CEF, and ExtraHop normalization.

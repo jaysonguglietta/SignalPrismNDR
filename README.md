@@ -1,8 +1,8 @@
 # SignalPrism NDR
 
-SignalPrism NDR is a local and cloud-ready Network Detection and Response console for uploading or continuously ingesting cloud network evidence, correlating identity/DNS/threat/sensor telemetry, investigating entity paths, and governing containment actions. It supports AWS VPC Flow Logs plus CloudTrail, Route 53 resolver DNS, GuardDuty, Zeek JSON, and Suricata EVE JSON.
+SignalPrism NDR is a local and cloud-ready Network Detection and Response console for uploading or continuously ingesting cloud network evidence, correlating identity/DNS/threat/sensor telemetry, investigating entity paths and zoomable activity heatmaps, and governing containment actions. Its multi-source event stitching automatically identifies AWS VPC Flow Logs, CloudTrail, Route 53 resolver DNS, GuardDuty, Zeek, Suricata, and OCSF evidence; normalizes source provenance; and builds confidence-scored incident timelines with explicit link reasons, conflicts, and telemetry gaps.
 
-The detection-operations command center prioritizes attacks by breadth, velocity, privilege, impact, confidence, and blast radius; monitors source and sensor health; resolves time-aware entity relationships; governs seasonal behavior models; analyzes encrypted-traffic metadata; and forecasts telemetry cost. Native exports use OCSF 1.8, while Amazon Security Lake delivery uses a separate OCSF 1.3 compatibility profile with one event class per source, time ordering, five-minute delivery, assigned prefixes, provider identity, and Zstandard Parquet.
+The detection-operations command center prioritizes attacks by breadth, velocity, privilege, impact, confidence, and blast radius; monitors source and sensor health; resolves time-aware entity relationships; governs seasonal behavior models; analyzes encrypted-traffic metadata; and forecasts telemetry cost. An explainable Top 10 consolidates duplicate detections, exposes every urgency factor, and drills into linked evidence. Governed executive briefs add period-over-period metrics, evidence citations, PDF/CSV/JSON exports, and admin-managed tenant-inbox schedules. Native exports use OCSF 1.8, while Amazon Security Lake delivery uses a separate OCSF 1.3 compatibility profile with one event class per source, time ordering, five-minute delivery, assigned prefixes, provider identity, and Zstandard Parquet.
 
 An in-product `Learn` workspace explains NDR concepts, analytical boundaries, urgency scoring, each operational screen, a practical signal-investigation playbook, and core terminology. It links learners directly into the live workflows and can load the guided demo for hands-on practice.
 
@@ -22,7 +22,8 @@ An in-product `Learn` workspace explains NDR concepts, analytical boundaries, ur
 - [Demo Script](docs/DEMO_SCRIPT.md)
 - [Security Notes](SECURITY.md)
 - [Security Hardening](docs/SECURITY_HARDENING.md)
-- [Security Remediation Record](docs/SECURITY_REMEDIATION_2026-07-17.md)
+- [Security Remediation Record (August 2026)](docs/SECURITY_REMEDIATION_2026-08-11.md)
+- [Prior Security Remediation Record (July 2026)](docs/SECURITY_REMEDIATION_2026-07-17.md)
 - [Threat Model](docs/THREAT_MODEL.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
@@ -99,6 +100,9 @@ Run automated UI workflow checks with:
 
 ```bash
 npm run ui:test
+npm run stitching:test
+npm run heatmap:test
+npm run executive:test
 ```
 
 Optional visual regression specs are available for Playwright/browser-driver runs:
@@ -128,20 +132,23 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 
 ## Product workflow
 
-1. Upload, drag/drop, paste, or load the sample flow evidence.
+1. Upload or drag/drop one or more evidence files, paste evidence, or load the sample flow evidence. Multi-file batches are parsed independently, auto-identified, normalized, and analyzed together with source provenance.
 2. Create or load an investigation workspace, or use the guided demo.
 3. Validate import quality and review parser issues.
-4. Triage the NDR overview for risk, detections, observations, entities, rejects, and data volume.
-5. Investigate detection cards by severity, confidence, tactic, technique, response guidance, linked evidence, and explainability.
-6. Tune the detection profile for strict, balanced, or focused review.
-7. Pivot into entity risk, entity timeline, internal paths, external paths, or filtered raw records.
-8. Run advanced hunts with fielded queries and save reusable hunts.
-9. Track managed sources, coverage, ingest history, async job status, and saved baselines, then ingest or schedule CloudWatch/S3 imports directly from source inventory.
-10. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
-11. Manage tenant users, roles, source ownership, access-review exports, and audit-review evidence from the Admin screen.
-12. Use the Enterprise workspace for cited answers, detection operations, production hardening, threat intel, detection-as-code, playbooks, vault bundles, reports, and governance readiness.
-13. Simulate traffic reduction policies and export detections, records, and full investigation packages.
-14. Submit controlled investigation or Security Lake exports for tenant-admin approval, then consume the time-limited approval once. Security Lake approvals are bound to the OCSF payload SHA-256.
+4. Open `Topology > Event stitching` to review ordered multi-source incident chains, why each event was linked, confidence, originating files, blocked ambiguous joins, and missing telemetry.
+5. Investigate replayed evidence in `Topology` using the entity graph, zoomable time activity heatmap, source-to-destination communication matrix, or privacy-preserving geographic view.
+6. Investigate detection cards by severity, confidence, tactic, technique, response guidance, linked evidence, and explainability.
+7. Tune the detection profile for strict, balanced, or focused review.
+8. Pivot into entity risk, entity timeline, internal paths, external paths, or filtered raw records.
+9. Run advanced hunts with fielded queries and save reusable hunts.
+10. Track managed sources, coverage, ingest history, async job status, and saved baselines, then ingest or schedule CloudWatch/S3 imports directly from source inventory.
+11. Paste DNS/TLS/HTTP/application enrichment and review application intelligence.
+12. Manage tenant users, roles, source ownership, access-review exports, and audit-review evidence from the Admin screen.
+13. Use `Overview > Top 10 findings` to rank consolidated attack stories, inspect the urgency factors, and isolate linked evidence.
+14. Generate an evidence-cited executive brief in `Reports`, compare current/prior metrics, and create governed weekly or monthly tenant-inbox deliveries.
+15. Use the Enterprise workspace for cited answers, detection operations, production hardening, threat intel, detection-as-code, playbooks, vault bundles, reports, and governance readiness.
+16. Simulate traffic reduction policies and export detections, records, stitched chains, and full investigation packages.
+17. Submit controlled investigation, executive report, or Security Lake exports for tenant-admin approval, then consume the time-limited approval once. Security Lake approvals are bound to the OCSF payload SHA-256.
 
 ## Supported input
 
@@ -152,6 +159,10 @@ AWS deployment scaffolding lives in `infra/aws/terraform`.
 - CloudWatch-style JSON or JSONL records with a `message` field.
 - Azure NSG Flow Log JSON.
 - GCP VPC Flow Log JSON.
+- AWS CloudTrail, GuardDuty, and Route 53 Resolver query JSON or JSONL.
+- Zeek JSON, Suricata EVE JSON/JSONL, and OCSF JSON.
+
+The browser accepts up to 20 files in one batch. Each file is limited to 16 MB and the combined decoded batch is limited to 32 MB. Valid files remain available when another source in the batch fails. Use the evidence-source filter or `file:` hunt field to isolate flow records, and review per-file formats and results in Import Quality. Browser stitching evaluates up to 50,000 valid-time events and 20,000 links; larger continuous datasets belong in the managed asynchronous analytics path.
 
 Core parsing and detection run in the browser. When the backend is enabled, workspaces, cases, evidence-run samples, raw evidence package references, managed source definitions, enterprise settings, detection rules, enterprise artifacts, tenant admin records, async job runs, and controlled investigation exports are persisted through tenant-scoped APIs.
 
@@ -197,6 +208,7 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - Tenant-backed investigation workspaces with guided demo mode.
 - Case queue with status, severity override, assignee, notes, and audit log.
 - Detection explainability, confidence interpretation, and tunable rule profiles.
+- Explainable Top 10 findings with duplicate consolidation, period/source/severity/environment filters, trend comparison, business context, score factors, owner/status, and linked-evidence pivots.
 - Managed AWS source inventory with account, region, source type, ENIs, CIDRs, log groups, prefixes, direct ingest, and schedule creation.
 - Tenant admin screen for users, roles, and managed source ownership.
 - Enterprise command center for readiness scoring, detection operations dashboards, production hardening review, source discovery, detection rule lifecycle, asset context, policy exposure review, quality metrics, and governance controls.
@@ -209,16 +221,19 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - Case tasks, watchers, due dates, SLA breach posture, notification policy resources, regional cells, provider workspaces, data-residency/BYOK posture, and governed agent evaluations.
 - Detection-as-code bundle export with rule quality scoring, draft/test/production promotion, cloning, approval metadata, and rollback-ready versions.
 - Response playbook runs, evidence vault bundle manifests, stakeholder report modes, tenant admin readiness, access review, audit review, and replay timeline exports.
+- Evidence-cited executive briefs with risk posture, prior-period deltas, operational interpretation, known-context caveats, PDF/CSV/JSON packages, optional bounded Bedrock narrative, and governed tenant-inbox schedules.
 - Security Lake/SIEM OCSF NDJSON export with backend audit manifest support.
 - Full raw evidence packages in local package storage or S3 Object Lock storage with retention metadata.
 - Async CloudWatch/S3 import runs with polling status and completion/failure notifications.
 - Durable SQS ingestion with separate API/worker roles, autoscaled Fargate workers, retries, queue-age monitoring, and a dead-letter queue.
 - CloudTrail, Route 53 DNS, GuardDuty, Zeek, and Suricata normalization with explainable cross-source correlation and ATT&CK mappings.
+- Browser-native mixed-file event stitching with source-aware IDs, ordered attack stages, entity/time/session/Community ID/ENI joins, confidence policies, analyst-visible rationale, telemetry gaps, common-entity suppression, tenant isolation, and account-boundary ambiguity controls.
 - Two-person response action workflow with EventBridge-only execution, retained event archive, idempotency keys, and no analyst-controlled webhooks.
 - Ed25519-signed detection content verification, admin-only import to test status, and preserved independent production promotion.
 - Server-backed enterprise readiness score covering identity, storage, queueing, retention, source ownership, response, and detection governance.
 - RBAC-controlled portable investigation package export.
 - Visual topology map with playable time replay, scrubbing, step controls, and recent-event trail.
+- Zoomable activity, communication-matrix, and geographic heatmaps with metric/group/scale controls, detection and stitched-evidence scopes, keyboard-accessible drill-down, Shift+drag time brushing, contextual selection, and governed export.
 - Automated UI flow tests for upload/demo analysis, rule tuning, AI context, investigation export, and topology replay.
 - Optional Playwright visual regression specs for desktop and mobile browser snapshots.
 
@@ -228,6 +243,7 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - `Detection`: severity, confidence, tactic, technique, entity, summary, tags, response guidance, and linked evidence records.
 - `EntityRisk`: IP/entity key, risk score, peers, ports, traffic volume, detection count, reject count, and tags.
 - `Path`: ranked internal or external source-to-destination traffic path.
+- `HeatmapView`: bounded mode, grouping, metric, evidence scope, replay range, cells or map points, active selection, and export summary.
 - `ParserIssue`: skipped-line quality signal with line number and message.
 - `IngestJob`: scheduled S3 or CloudWatch import config, interval, enabled state, and last run status.
 - `Workspace`: tenant, name, current evidence snapshot, detections, source inventory, hunts, enrichment, rule profile, and baseline signatures.
@@ -243,6 +259,9 @@ Core parsing and detection run in the browser. When the backend is enabled, work
 - `PlaybookRun`: case-linked response plan with template, step owners, status, and created time.
 - `EvidenceVaultBundle`: chain-of-custody manifest with retention deadline, legal hold flag, counts, hash, and storage posture.
 - `EnterpriseReport`: generated stakeholder report for analyst, executive, compliance, or manager views.
+- `ExecutiveBrief`: immutable report snapshot with period, classification, risk posture, cited metrics, ranked findings, decisions, caveats, and integrity digest.
+- `ReportSchedule`: admin-owned weekly or monthly tenant-inbox delivery policy with tenant recipients, evidence period, classification, package format, and next-run state.
+- `ReportDelivery`: tenant-scoped report snapshot delivered to the governed in-product inbox.
 - `AssetContext`: owner, environment, criticality, account, role, IP, ENI, and instance metadata.
 - `PolicyFinding`: public exposure, sensitive access, and high-volume egress review finding.
 - `AuditRecord`: append-only actor, role, action, details, creation time, and retention deadline.

@@ -63,12 +63,49 @@ Controls:
 
 Use one of these intake paths:
 
-- Drag a `.log`, `.txt`, `.csv`, `.gz`, `.json`, or `.jsonl` file into the upload area.
+- Drag or select one or more `.log`, `.txt`, `.csv`, `.gz`, `.json`, or `.jsonl` files in the upload area. SignalPrism parses each file independently, merges valid records for correlation, and retains the originating filename on every record.
 - Paste flow log text and select `Analyze`.
 - Select `Sample` to load realistic sample evidence.
 - Use `Pipeline > Cloud ingest` to import from S3 or CloudWatch Logs.
 
-After loading evidence, check `Import Quality` for skipped rows or malformed fields.
+After loading evidence, check the per-file summary and `Import Quality` for detected formats, failed sources, skipped rows, or malformed fields. Use the `Evidence source` filter to isolate one flow file, search by filename, or use `file:filename.log` in Hunt. Multi-file browser batches accept up to 20 files, 16 MB per file, and 32 MB of combined decoded evidence. A failed file does not discard records or telemetry from successful files in the same batch.
+
+## Stitch Events Across Sources
+
+Open `Topology > Event stitching` after loading two or more related evidence sources. SignalPrism automatically recognizes flow logs, CloudTrail, GuardDuty, Route 53 Resolver, Zeek, Suricata, OCSF, and bounded generic JSON events.
+
+The chain workspace provides:
+
+- Ordered attack stages and event timestamps.
+- Original evidence filename and detected format for every event.
+- Confidence and urgency scores.
+- The shared entity and time relationship behind every link.
+- Independent-source and cross-format corroboration.
+- Missing identity, DNS, or independent detection telemetry.
+- Blocked ambiguous joins and high-frequency shared entities that were suppressed.
+
+Use `Correlation window` to choose 15 minutes, one hour, four hours, or 24 hours. Use `Link policy` to require balanced, high-confidence, or strict links. A wider window increases recall and false-link risk; strict confidence can split a real incident when evidence is sparse.
+
+SignalPrism never joins different tenant IDs. Matching private or shared network addresses across AWS accounts are not linked without a stronger identity, workload, interface, Community ID, or session key. Event time is authoritative, so validate collector clock health when a sequence appears incomplete or reversed.
+
+`Export chains` follows investigation export governance. When approval is required, it submits the full investigation package to the controlled export queue. Exported stitched events omit bounded raw payload bodies while retaining normalized evidence and provenance.
+
+## Investigate With Heatmaps
+
+Open `Topology` and choose a visualization mode:
+
+- `Graph`: entity-to-entity paths for the current replay position and evidence selection.
+- `Activity`: a zoomable time heatmap grouped by entity, subnet, cloud account, destination port, protocol, or evidence source.
+- `Matrix`: a source-to-destination communication matrix for quickly finding dominant, sparse, or unusual paths.
+- `Geographic`: public endpoint locations and communication arcs using imported enrichment coordinates.
+
+Choose flow events, bytes, rejected flows, risk weight, or detection evidence as the cell metric. Use logarithmic color for skewed network volumes and linear color for direct comparisons. Scope the view to all replayed flows, detection-linked evidence, or stitched incidents.
+
+Click a cell or map endpoint to filter Records, Detections, the graph, replay events, and event stitching to the same evidence. Double-click to open Records. In Activity mode, hold Shift and drag across cells in one row to select a time range. `Clear selection` restores the investigation context. Zoom, pan, replay, and Reset view are keyboard-accessible; Escape clears a selection.
+
+`Export view` includes the active mode, grouping, metric, scale, replay position, bounded aggregate summary, selection, and up to 1,000 normalized evidence records. Tenant export approval and role policy apply.
+
+SignalPrism never sends IPs to a third-party geolocation API. Import `latitude`, `longitude`, `country`, `region`, `city`, `geoSource`, and `geoPrecision` through Pipeline enrichment. Locations are marked approximate unless precision is explicitly `exact`; TEST-NET sample addresses use labeled demonstration coordinates, and unresolved endpoints remain visible in the status count.
 
 ## Triage The Overview
 
@@ -82,8 +119,11 @@ The `Overview` tab shows:
 - Traffic timeline.
 - Priority entities.
 - Top destination ports.
+- An explainable Top 10 findings table.
 
 Start with high-severity detections and priority entities with elevated rejects, sensitive ports, or high byte volume.
+
+The Top 10 table consolidates detections with the same title, tactic, and technique so one behavior does not crowd out other attack stories. Filter by evidence window, source, severity, or known environment. Select `Explain` to inspect the 100-point urgency calculation across severity, confidence, asset criticality, exposure, breadth, velocity, threat intelligence, and case/SLA pressure. Select `View evidence` to isolate the exact linked records. Unknown ownership or criticality remains `Unknown` and contributes no positive risk points.
 
 ## Investigate Detections
 
@@ -181,8 +221,11 @@ Open `Pipeline > Enrichment` and paste JSONL or CSV metadata with fields such as
 - `app`
 - `category`
 - `ai`
+- `latitude` / `longitude`
+- `country`, `region`, and `city`
+- `geoSource` and `geoPrecision`
 
-Enrichment improves application intelligence and flags candidate shadow AI traffic.
+Enrichment improves application intelligence, flags candidate shadow AI traffic, and supplies analyst-controlled geographic context without an external IP lookup.
 
 ## Cloud Ingest
 
@@ -287,11 +330,30 @@ Security Lake approvals are bound to the SHA-256 of the reviewed OCSF payload. I
 
 Open `Topology` to visualize entity-to-entity paths. Move the replay slider to focus on activity up to a point in time, use `Play` for replay, or step backward and forward through the timeline. The recent-event trail shows the latest records included at the current replay position.
 
-Use topology to explain lateral paths, high-volume egress, and repeated external contacts.
+Use topology to explain lateral paths, high-volume egress, repeated external contacts, concentrated time windows, asymmetric communication, and public endpoint concentration. Heatmap selections remain synchronized with replay and linked evidence until cleared.
 
 ## Reports And AI Assistant
 
 Open `Reports`.
+
+### Executive security brief
+
+Select a 7-, 30-, or 90-day window or the current evidence set, choose the information classification, enter the organization label, then select `Generate brief`. The report includes:
+
+- Overall risk posture and prior-report delta.
+- Current, previous, change, and interpretation columns for seven operational metrics.
+- Evidence-cited Top 10 findings using `[F#]` references.
+- Metric citations using `[M#]` references.
+- Decisions, response actions, coverage gaps, and explicit unknown business context.
+- A SHA-256 content digest.
+
+`Evidence-cited` produces a deterministic local narrative. `Bedrock-assisted` sends only the bounded report facts to the configured backend and retains evidence anchors; when Bedrock is disabled or fails, SignalPrism keeps the deterministic narrative.
+
+PDF, CSV, and JSON exports use the tenant approval policy. When approval is required, an analyst or admin requests the export, a separate stepped-up admin approves it, and the requester consumes the sealed report once. Approval queue metadata shows purpose, format, requester, status, and payload hash without exposing report content.
+
+### Executive report schedules
+
+Tenant admins can create weekly or monthly schedules for active tenant recipients. A schedule fixes the evidence period, classification, package format, and governed tenant-inbox recipients. `Run` creates a fresh report snapshot and delivery immediately; `Pause`, `Resume`, and `Delete` manage its lifecycle. Deliveries remain downloadable from the tenant inbox. This version evaluates due schedules while an authenticated admin console is active; use a production worker/scheduler integration for unattended external delivery.
 
 The built-in analyst summary is generated locally from detections, entity risk, and application intelligence.
 
@@ -324,6 +386,7 @@ Supported exports:
 - Redacted evidence JSON.
 - Append-only backend audit NDJSON.
 - Investigation package JSON.
+- Executive brief PDF, CSV, and JSON.
 
 Use redacted exports when sharing evidence outside the security team.
 

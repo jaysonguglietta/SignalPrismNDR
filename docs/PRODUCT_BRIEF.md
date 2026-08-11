@@ -38,7 +38,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
    Create cases, assign owners, override severity, record notes, and view case audit history.
 
 6. **Reporting And Export**
-   Generate analyst summaries, policy recommendations, redacted records, OCSF-like JSON, CEF, CSV, and optional Bedrock summaries; route sensitive investigation and Security Lake releases through tenant-admin approval.
+   Rank consolidated Top 10 findings, generate evidence-cited executive briefs with prior-period metrics and known-context caveats, schedule tenant-inbox deliveries, and route PDF/CSV/JSON, investigation, and Security Lake releases through tenant-admin approval.
 
 7. **Continuous Ingest**
    Configure protected S3 or CloudWatch ingest jobs from either the pipeline form or managed source inventory, then run them manually or on a schedule.
@@ -51,7 +51,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 
 ## Main Screens
 
-- **Overview**: risk metrics, timeline, priority entities, top destination ports.
+- **Overview**: detection-operations command center, explainable Top 10 findings, score-factor detail, risk metrics, timeline, priority entities, and top destination ports.
 - **Detections**: severity-filtered detection queue with response guidance and linked evidence.
 - **Entities**: entity risk list, entity timeline, peer relationships, and traffic detail.
 - **Records**: searchable, sortable normalized evidence table.
@@ -63,7 +63,7 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 - **Topology**: entity-to-entity path map with playable replay, step controls, scrubber, and recent-event trail.
 - **Enterprise**: deployment readiness, signal fusion, governed response, signed detection supply chain, detection operations, cited copilot, source health, source discovery, threat intelligence, entity risk, detection-as-code, OCSF/SIEM export, graph/replay, policy exposure, playbooks, evidence vault, reports, and governance posture.
 - **Platform**: continuous telemetry, behavior deviations, campaigns, safe retrospective hunts, investigation-agent runs, connector inventory, Organizations onboarding, direct immutable evidence upload, AI/cryptography posture, custom roles, and service accounts.
-- **Reports**: Bedrock assistant, analyst summary, policy recommendations, and privacy exports.
+- **Reports**: evidence-cited executive brief, current/prior metric table, optional Bedrock-assisted narrative, governed report exports, admin schedules, tenant-inbox deliveries, analyst assistant, policy recommendations, and privacy exports.
 
 ## User Roles
 
@@ -93,6 +93,8 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - `PlaybookRun`: case-linked response template with step owners and status.
 - `EvidenceVaultBundle`: retention and chain-of-custody manifest with hash and storage posture.
 - `EnterpriseReport`: stakeholder report for analyst, executive, compliance, or manager audiences.
+- `ExecutiveBrief`: classified, integrity-digested report snapshot with cited metrics, ranked findings, decisions, and caveats.
+- `ReportSchedule` / `ReportDelivery`: admin-owned tenant-inbox delivery policy and its recipient-bound report snapshot.
 - `AssetContext`: owner, criticality, environment, account, role, IP, ENI, and instance metadata.
 - `PolicyFinding`: exposure finding generated from security policy text plus observed flow evidence.
 - `AuditRecord`: append-only actor/action/detail with retention metadata.
@@ -124,6 +126,7 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Retained raw evidence packages that need Object Lock compatible storage and retention governance.
 - Detection rules that need safe testing before production use.
 - Duplicate, expired, cross-tenant, self-approved, or evidence-mismatched export requests.
+- Duplicate detections referencing the same evidence, missing prior-period baselines, unknown business ownership, non-tenant schedule recipients, and forged report-delivery recipient lists.
 - Security Lake exports that need OCSF normalization and audit manifests.
 - Firehose partial delivery, stale cross-account credentials, expired evidence upload sessions, SCIM replay, service-account rotation, and connector endpoint abuse.
 - Asset ownership gaps that reduce response confidence.
@@ -153,6 +156,8 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Platform operations workspace for behavior analytics, campaign assembly, retrospective hunts, AI investigation runs, cross-account onboarding, immutable direct uploads, connectors, crypto/AI posture, custom roles, and service accounts.
 - Case management and case audit history.
 - Detection explainability and tunable rule profiles.
+- Evidence-linked Top 10 findings with duplicate consolidation, context filters, trend comparison, and transparent eight-factor urgency scoring.
+- Executive reports with deterministic citations, optional bounded Bedrock narrative, seven period-over-period metrics, SHA-256 integrity, PDF/CSV/JSON export, and governed tenant-inbox schedules.
 - Managed AWS source inventory with direct ingest and schedule creation.
 - RBAC-controlled portable investigation package export with two-person, expiring, one-time approval.
 - Playable topology replay with timeline scrubbing.

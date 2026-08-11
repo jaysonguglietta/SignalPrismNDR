@@ -61,7 +61,9 @@ The table enables TTL for sessions and run slots, `kind-createdAt-index` for cro
 
 ## Response Automation Boundary
 
-`response_execution_enabled` defaults to `false`. When enabled, approved actions are emitted to the Terraform-created EventBridge bus and archived. Attach customer-owned rules and targets with dedicated least-privilege roles. Targets must validate scope and deduplicate using the supplied action ID; SignalPrism never executes analyst-provided webhook URLs.
+`response_execution_enabled` defaults to `false`. When enabled, set `response_verifier_subjects` to stable identities operated independently from requesters and approvers. Approved actions are emitted to the Terraform-created EventBridge bus and archived. Attach customer-owned rules and targets with dedicated least-privilege roles. Targets must validate scope and deduplicate using the supplied action ID; SignalPrism never executes analyst-provided webhook URLs.
+
+Production uses the KMS-encrypted evidence staging bucket for short-lived export approval bodies. DynamoDB retains only bounded metadata, hashes, state, identity keys, and TTL. Consumed payloads are digest-verified and deleted immediately; the bucket lifecycle removes abandoned objects after three days.
 
 EFS is still mounted for local scratch data and fallback package storage. It is encrypted at rest and mounted with an access point.
 

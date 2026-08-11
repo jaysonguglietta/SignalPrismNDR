@@ -32,11 +32,16 @@ Files:
 - `src/idb-store.js`: tenant-plus-subject scoped IndexedDB persistence for evidence runs, cases, and case audit.
 - `src/backend-client.js`: browser API client, API key storage, OIDC PKCE callback, cloud ingest, AI calls.
 - `src/topology.js`: entity path graph building and SVG rendering.
+- `src/network-heatmap.mjs`: bounded, browser-safe activity, communication matrix, and geographic aggregation plus accessible rendering and evidence-selection predicates.
+- `src/executive-reporting.mjs`: deterministic finding consolidation, explainable urgency scoring, period comparison, executive report construction, CSV hardening, and report-schedule validation.
+- `src/event-stitching.mjs`: browser-safe mixed-source identification, normalization, bounded graph correlation, chain assembly, confidence scoring, conflict controls, and coverage-gap analysis.
 - `src/platform-ui.mjs` and `src/operations-ui.mjs`: enterprise platform, command-center, case-task, governance, and education-facing operations surfaces.
 - `src/enterprise-telemetry.mjs`, `src/enterprise-analytics.mjs`, and `src/advanced-operations.mjs`: bounded normalization, correlation, behavior, campaigns, urgency, graph, protocol, threat-intelligence, packet, and agent logic.
 - `src/ocsf.mjs` and `src/connector-catalog.mjs`: OCSF profiles/delivery records and governed connector policy.
 
 The frontend can run without a backend for upload/paste analysis. Backend-only features display useful disabled states when unavailable.
+
+Heatmap aggregation is separated from DOM orchestration so the same deterministic model can move to a worker or managed query API for larger datasets. Browser models cap rows, time buckets, matrix groups, per-cell evidence references, and rendered geographic edges; lower-ranked groups are reported as omitted rather than silently expanding the page.
 
 ## Backend
 
@@ -60,8 +65,9 @@ Responsibilities:
 - Tenant-scoped local JSON or DynamoDB persistence for workspaces, cases, evidence runs, managed sources, jobs, runs, enterprise artifacts, and audit records.
 - Full raw evidence package persistence to local object-package files or S3 Object Lock storage.
 - Tenant admin roster and source ownership management.
-- Enterprise settings, detection-rule catalog, and advanced artifact persistence for copilot notes, threat-intel imports, playbook runs, evidence vault bundles, and reports.
-- Two-person, expiring, one-time investigation/Security Lake export approvals with OCSF content-hash binding.
+- Enterprise settings, detection-rule catalog, and advanced artifact persistence for copilot notes, threat-intel imports, playbook runs, evidence vault bundles, executive briefs, report schedules, and tenant-inbox deliveries.
+- Two-person, expiring, one-time investigation, executive-report, and Security Lake export approvals with sealed payloads and OCSF content-hash binding.
+- Type-specific artifact authorization: report schedules and deliveries are admin writes; viewer schedule enumeration is blocked; deliveries are visible only to admins or named tenant recipients; restricted executive briefs require analyst or admin access.
 - Durable S3/CloudWatch job runs with browser polling status and worker-safe completion handling.
 - Append-only audit records, filtered audit review, and NDJSON export.
 - RBAC-controlled investigation package export.
@@ -90,6 +96,9 @@ Backend persistence:
 
 - `NDR_STORE=local`: JSON/NDJSON files under `NDR_DATA_DIR`.
 - `NDR_STORE=dynamodb`: single-table DynamoDB with `pk`, `sk`, serialized `payload`, `schemaVersion=2`, top-level revision/update fields, TTL, a global `kind-createdAt-index` for scheduler discovery, and `tenant-kind-createdAt-index` for bounded tenant listing. Dual-read migration merges legacy and indexed records until backfill is complete.
+- Source ownership is a downstream authorization boundary. Telemetry and derived correlations, behavior profiles, campaigns, hunts, cases, evidence, workspaces, packet manifests, response actions, stream deliveries, AI runs, evaluations, jobs, and exports retain managed-source provenance and are filtered before use or disclosure.
+- Durable queue messages contain only contract version, tenant, job, and run identifiers. Workers reload current job/source state from the authoritative store and use a server-created worker principal; queue-carried configuration and identities are never executed.
+- Export approval metadata remains in DynamoDB while approval content is stored as a tenant-prefixed, digest-bound object in the encrypted staging bucket and removed after one-time consumption.
 - All records use tenant-scoped partitions shaped as `TENANT#<tenantId>#<kind>`, including jobs, runs, audit, sessions, approvals, leases, and run slots.
 - The Admin audit-review UI reads a bounded, filtered tenant event list and exports the tenant audit stream as NDJSON for external review.
 
@@ -170,6 +179,8 @@ sequenceDiagram
   participant R as Bedrock
 
   B->>B: Parse uploaded/pasted logs
+  B->>B: Auto-identify and normalize mixed evidence
+  B->>B: Build tenant-safe explainable incident chains
   B->>B: Generate detections and entity risk
   B->>A: POST /api/evidence-runs
   A->>D: Store tenant evidence metadata/sample
@@ -202,11 +213,14 @@ sequenceDiagram
 - Keep AWS credentials out of the browser.
 - Keep AI opt-in, bounded, and auditable.
 - Keep domain modules independently testable and preserve the no-runtime-dependency browser path.
+- Treat event links as confidence-scored hypotheses. Preserve source provenance and disclose missing telemetry or blocked ambiguous joins.
 
 ## Known Architectural Limits
 
 - `app.js` remains a compatibility orchestrator. New enterprise domains are split into modules; a future bundler can finish extracting the tightly coupled legacy flow workbench without changing public behavior.
 - Large evidence sets are bounded for browser performance.
+- Browser stitching evaluates at most 50,000 valid-time events, 20,000 links, 250 chains, and 500 events per chain. Managed analytics should process larger continuous collections.
+- Time/entity stitching does not establish causality. Private/shared IP evidence across AWS accounts requires a stronger identity, workload, interface, Community ID, or session match; tenant mismatches always fail closed.
 - Zeek and Suricata support consumes enriched event telemetry; SignalPrism does not capture or reconstruct full packets.
 - EventBridge targets and containment implementation are environment-owned and must deduplicate by action ID.
 - Bedrock answers are advisory and must be validated against source evidence.

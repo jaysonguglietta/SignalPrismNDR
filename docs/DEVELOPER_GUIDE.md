@@ -44,13 +44,19 @@ Runs parser and detection smoke tests.
 npm run integration
 ```
 
-Starts temporary backend instances and verifies API auth/revocation/MFA step-up, explicit tenant/source RBAC, atomic case updates, rate limiting, AI disabled behavior, governed detections/responses/exports, durable stream retry, and SigV4 signing.
+Starts temporary backend instances and verifies API auth/revocation/MFA step-up, explicit tenant/source/report RBAC, atomic case updates, rate limiting, AI disabled behavior, governed detections/responses/exports, sealed executive-report approvals, durable stream retry, and SigV4 signing.
 
 ```bash
 npm run ui:test
 ```
 
 Runs no-dependency UI workflow checks for upload/demo analysis, rule tuning, AI context shaping, investigation export, topology replay, CSV injection defense, OCSF timestamp handling, and advanced enterprise models.
+
+```bash
+npm run executive:test
+```
+
+Runs deterministic Top 10 consolidation, scoring, unknown-context, report, CSV hardening, and schedule validation tests.
 
 ```bash
 npm run visual:test
