@@ -8,7 +8,11 @@ dist/
 coverage/
 
 .ndr-data/
+.ndr-playwright-data/
+test-results/
+playwright-report/
 *.log
+!samples/*.log
 
 .terraform/
 *.tfstate

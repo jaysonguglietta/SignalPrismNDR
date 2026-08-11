@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { buildStitchedIncidents, parseStitchingTelemetry } from "./src/event-stitching.mjs";
 
 const require = createRequire(import.meta.url);
 const {
@@ -20,6 +21,8 @@ const {
   buildReplayTimeline,
   buildSourceHealth,
   buildTopologyReplaySnapshot,
+  csvValue,
+  mergeParsedEvidence,
   parseVpcFlowLog,
   parseThreatIntel,
   scoreDetectionRuleQuality,
@@ -29,12 +32,24 @@ const {
 const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
 
 assertIncludes(html, 'id="fileInput"', "upload control should exist");
+assertIncludes(html, 'id="fileInput" type="file" multiple', "upload control should accept multiple files");
+assertIncludes(html, 'id="evidenceSourceFilter"', "multi-source evidence should be filterable by file");
 assertIncludes(html, 'id="loadDemoButton"', "guided demo button should exist");
 assertIncludes(html, 'id="ruleProfileSelect"', "rule tuning select should exist");
 assertIncludes(html, 'id="summarizeAiButton"', "AI summary button should exist");
 assertIncludes(html, 'id="exportInvestigationPackageButton"', "investigation export button should exist");
 assertIncludes(html, 'id="playReplayButton"', "topology replay play button should exist");
 assertIncludes(html, 'id="replayEventList"', "topology replay event list should exist");
+assertIncludes(html, 'id="stitchChainList"', "multi-source incident chain list should exist");
+assertIncludes(html, 'id="stitchConfidenceSelect"', "event stitching confidence policy should exist");
+assertIncludes(html, 'id="stitchGapList"', "stitching coverage gaps and blocked joins should exist");
+assertIncludes(html, 'id="topologyModeControl"', "topology visualization mode control should exist");
+assertIncludes(html, 'data-topology-mode="activity"', "time activity heatmap should exist");
+assertIncludes(html, 'data-topology-mode="matrix"', "communication matrix should exist");
+assertIncludes(html, 'data-topology-mode="geographic"', "geographic heatmap should exist");
+assertIncludes(html, 'id="heatmapEvidenceFilter"', "heatmap evidence scope should be filterable");
+assertIncludes(html, 'id="clearHeatmapSelectionButton"', "heatmap evidence selection should be clearable");
+assertIncludes(html, 'id="exportHeatmapButton"', "governed heatmap export should exist");
 assertIncludes(html, 'id="adminTab"', "tenant admin tab should exist");
 assertIncludes(html, 'id="saveTenantUserButton"', "tenant user save control should exist");
 assertIncludes(html, 'id="assignSourceOwnerButton"', "source ownership assignment should exist");
@@ -52,11 +67,38 @@ assertIncludes(html, 'id="analyzePolicyButton"', "policy exposure workflow shoul
 assertIncludes(html, 'id="createPlaybookRunButton"', "response playbook workflow should exist");
 assertIncludes(html, 'id="createEvidenceVaultButton"', "evidence vault workflow should exist");
 assertIncludes(html, 'id="generateEnterpriseReportButton"', "enterprise reporting workflow should exist");
+assertIncludes(html, 'id="ingestTelemetryButton"', "enterprise telemetry ingest should exist");
+assertIncludes(html, 'id="correlateTelemetryButton"', "cross-source correlation should exist");
+assertIncludes(html, 'id="requestResponseActionButton"', "governed response request should exist");
+assertIncludes(html, 'id="verifyDetectionContentButton"', "signed detection content verification should exist");
+assertIncludes(html, 'id="platformTab"', "enterprise platform workspace should exist");
+assertIncludes(html, 'id="runBehaviorButton"', "behavior analytics workflow should exist");
+assertIncludes(html, 'id="buildCampaignsButton"', "campaign assembly workflow should exist");
+assertIncludes(html, 'id="runRetrospectiveHuntButton"', "retrospective hunt workflow should exist");
+assertIncludes(html, 'id="runAiInvestigationButton"', "AI investigation agent workflow should exist");
+assertIncludes(html, 'id="publishOcsfButton"', "continuous OCSF publishing workflow should exist");
+assertIncludes(html, 'id="saveConnectorButton"', "governed connector workflow should exist");
+assertIncludes(html, 'id="discoverOrganizationButton"', "AWS Organizations discovery workflow should exist");
+assertIncludes(html, 'id="directEvidenceUploadButton"', "direct immutable evidence upload should exist");
+assertIncludes(html, 'id="saveCustomRoleButton"', "custom tenant role workflow should exist");
+assertIncludes(html, 'id="createServiceAccountButton"', "service account workflow should exist");
 
 const parsed = parseVpcFlowLog(SAMPLE_LOG);
+assert.equal(csvValue("=HYPERLINK(\"https://attacker.example\")"), "\"'=HYPERLINK(\"\"https://attacker.example\"\")\"", "CSV exports must neutralize spreadsheet formulas");
+assert.equal(csvValue("  +cmd|' /C calc'!A0"), "'  +cmd|' /C calc'!A0", "CSV exports must neutralize formulas after leading whitespace");
 const analysis = analyzeRecords(parsed.records, parsed.errors);
 assert.equal(parsed.records.length, 11, "upload/analyze flow should parse the demo evidence");
 assert.ok(analysis.detections.length > 0, "demo flow should produce detections");
+
+const mergedEvidence = mergeParsedEvidence([
+  { id: "source-a", name: "prod-vpc.log", parsed },
+  { id: "source-b", name: "shared-services.log", parsed: parseVpcFlowLog(SAMPLE_LOG) },
+  { id: "source-c", name: "broken.log", error: "Unsupported evidence encoding" }
+]);
+assert.equal(mergedEvidence.records.length, 22, "multi-file analysis should preserve records from every valid source");
+assert.equal(mergedEvidence.sources.length, 3, "multi-file analysis should retain valid and failed source inventory");
+assert.equal(mergedEvidence.records[0].evidenceSource, "prod-vpc.log", "merged records should retain file provenance");
+assert.ok(mergedEvidence.errors.some((issue) => issue.source === "broken.log"), "partial batch failures should identify the affected source");
 
 const focused = tuneAnalysisForProfile(structuredCloneSafe(analysis), "focused", parsed.records);
 assert.ok(focused.detections.length <= analysis.detections.length, "focused tuning should not increase detections");
@@ -84,12 +126,18 @@ const exported = buildInvestigationPackageModel({
   sources: context.sources,
   hunts: ["action:REJECT"],
   cases: [{ id: "case-1", title: "Public admin access", severity: "high" }],
+  stitchedIncidents: buildStitchedIncidents([
+    ...parseStitchingTelemetry(JSON.stringify({ timestamp: "2026-07-16T20:01:30Z", event_type: "alert", src_ip: "10.0.1.15", dest_ip: "198.51.100.44", alert: { severity: 1, signature: "Known callback" } }), { sourceId: "ids", sourceName: "suricata.json" }).events,
+    ...parseStitchingTelemetry(JSON.stringify({ query_timestamp: "2026-07-16T20:02:00Z", srcaddr: "10.0.1.15", query_name: `${"x".repeat(64)}.example.net`, query_type: "A" }), { sourceId: "dns", sourceName: "dns.json" }).events
+  ], { windowMinutes: 60 }),
   analystSummary: "Executive summary",
   aiAnswer: "AI summary"
 });
 assert.equal(exported.product, "SignalPrism NDR", "export should identify the product");
 assert.equal(exported.workspace.evidenceText, undefined, "export should omit raw workspace evidence text");
 assert.ok(exported.records.length <= 500, "export should cap record evidence");
+assert.equal(exported.summary.stitchedChains, 1, "investigation export should summarize stitched incidents");
+assert.equal(exported.stitchedIncidents.chains[0].events[0].raw, undefined, "investigation export should omit raw normalized payload bodies");
 
 const replay = buildTopologyReplaySnapshot(parsed.records, 50);
 assert.ok(replay.includedRecords.length > 0, "replay should include records at midpoint");
@@ -126,8 +174,9 @@ assert.ok(replayTimeline.some((event) => event.type === "detection"), "timeline 
 const playbookSteps = buildPlaybookSteps("contain-public-admin", { title: "Case", assignee: "Analyst" });
 assert.ok(playbookSteps.length >= 3, "playbooks should create actionable response steps");
 
-const vaultManifest = buildEvidenceVaultManifest({ records: parsed.records, analysis, cases: [], settings: { governance: { evidenceRetentionDays: 30 } }, source: "unit" });
+const vaultManifest = await buildEvidenceVaultManifest({ records: parsed.records, analysis, cases: [], settings: { governance: { evidenceRetentionDays: 30 } }, source: "unit" });
 assert.ok(vaultManifest.evidenceHash, "vault manifest should include chain-of-custody hash");
+assert.equal(vaultManifest.evidenceHashAlgorithm, "SHA-256", "vault manifest should use a cryptographic evidence hash");
 
 const sourceHealth = buildSourceHealth([{ id: "source-1", name: "Prod", scope: ["eni-0a1b2c3d"] }], [], parsed.records, []);
 assert.equal(sourceHealth[0].title, "Prod", "source health should evaluate managed sources");

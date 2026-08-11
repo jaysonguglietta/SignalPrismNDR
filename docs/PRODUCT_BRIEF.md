@@ -38,16 +38,16 @@ An analyst can load flow evidence, understand what matters, pivot through affect
    Create cases, assign owners, override severity, record notes, and view case audit history.
 
 6. **Reporting And Export**
-   Generate analyst summaries, policy recommendations, redacted records, OCSF-like JSON, CEF, CSV, and optional Bedrock summaries.
+   Generate analyst summaries, policy recommendations, redacted records, OCSF-like JSON, CEF, CSV, and optional Bedrock summaries; route sensitive investigation and Security Lake releases through tenant-admin approval.
 
 7. **Continuous Ingest**
    Configure protected S3 or CloudWatch ingest jobs from either the pipeline form or managed source inventory, then run them manually or on a schedule.
 
 8. **Tenant Administration**
-   Manage tenant roster entries, roles, source ownership, and accountability for cloud evidence sources.
+   Manage tenant roster entries, roles, source ownership, access reviews, audit-event filtering, and accountability for cloud evidence sources.
 
 9. **Enterprise Operations**
-   Manage cited investigation answers, source health, threat intelligence, entity risk scoring, detection-as-code, Security Lake export, replay timelines, response playbooks, evidence vault bundles, stakeholder reports, governance controls, and detection quality.
+   Manage cited investigation answers, detection operations, production hardening, source health, threat intelligence, entity risk scoring, detection-as-code, Security Lake export, replay timelines, response playbooks, evidence vault bundles, stakeholder reports, governance controls, and detection quality.
 
 ## Main Screens
 
@@ -59,15 +59,16 @@ An analyst can load flow evidence, understand what matters, pivot through affect
 - **Coverage**: expected source coverage, blind spots, history, and baselines.
 - **Pipeline**: enrichment, cloud ingest, scheduled jobs, application intelligence, traffic optimization.
 - **Cases**: case intake, queue, notes, severity override, and audit log.
-- **Admin**: tenant users, role intent, source assignments, and ownership list.
+- **Admin**: tenant users, role intent, source assignments, ownership list, access review, and tenant audit review.
 - **Topology**: entity-to-entity path map with playable replay, step controls, scrubber, and recent-event trail.
-- **Enterprise**: readiness score, cited copilot, source health, source discovery, threat intelligence, entity risk scoring, rule lifecycle, detection-as-code, OCSF/SIEM export, asset context, graph/replay export, policy exposure, playbooks, evidence vault, reports, quality metrics, and governance posture.
+- **Enterprise**: deployment readiness, signal fusion, governed response, signed detection supply chain, detection operations, cited copilot, source health, source discovery, threat intelligence, entity risk, detection-as-code, OCSF/SIEM export, graph/replay, policy exposure, playbooks, evidence vault, reports, and governance posture.
+- **Platform**: continuous telemetry, behavior deviations, campaigns, safe retrospective hunts, investigation-agent runs, connector inventory, Organizations onboarding, direct immutable evidence upload, AI/cryptography posture, custom roles, and service accounts.
 - **Reports**: Bedrock assistant, analyst summary, policy recommendations, and privacy exports.
 
 ## User Roles
 
-- `admin`: full tenant access, destructive deletes, enterprise settings, audit export, ingest, controlled exports, and AI assistant.
-- `analyst`: create/update workspaces, cases, sources, evidence runs, enterprise artifacts, ingest, scheduled job creation, job execution, controlled exports, and AI assistant.
+- `admin`: full tenant access, destructive deletes, enterprise settings, audit review/export, access review, source ownership, export approvals, production-rule lifecycle, ingest, controlled exports, and AI assistant.
+- `analyst`: create/update workspaces, cases, owned sources, evidence runs, enterprise artifacts, ingest from owned inventory, scheduled job creation, job execution, controlled export requests, and AI assistant.
 - `viewer`: tenant read access without mutating cases, sources, enterprise artifacts, exports, AI, or ingest schedules.
 
 Local development runs as `local-dev` admin when neither API key nor OIDC is configured.
@@ -95,6 +96,12 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - `AssetContext`: owner, criticality, environment, account, role, IP, ENI, and instance metadata.
 - `PolicyFinding`: exposure finding generated from security policy text plus observed flow evidence.
 - `AuditRecord`: append-only actor/action/detail with retention metadata.
+- `ExportApproval`: tenant-bound payload digest, requester, separate approver, expiration, and one-time consumption state.
+- `SessionRecord`: tenant-scoped server registry entry holding principal, CSRF, expiry, and revocation state for an opaque signed browser session ID.
+- `TelemetryEvent`, `CorrelationFinding`, `ResponseAction`, and `DetectionContentBundle`: tenant-scoped signal fusion, explainable findings, two-person actions, and trusted detection publisher records.
+- `BehaviorProfile`, `BehaviorFinding`, `AttackCampaign`, and `HuntRun`: explainable deviations, linked incident narratives, and reproducible historical search results.
+- `Connector`, `OrganizationAccount`, and `EvidenceUpload`: secret-reference integrations, cross-account source onboarding, and direct Object Lock package state.
+- `RoleDefinition`, `ServiceAccount`, and `AiAgentRun`: permission intent, non-human identity lifecycle, and cited investigation-agent execution records.
 - `IngestJob`: scheduled S3 or CloudWatch import configuration.
 - `Workspace`: tenant investigation container with evidence snapshot, managed sources, hunts, enrichment, and rule profile.
 
@@ -104,15 +111,21 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - Gzipped files in browsers without `DecompressionStream`.
 - Large evidence sets that should stay bounded in browser memory.
 - Missing AWS credentials, disabled Bedrock, or insufficient IAM permissions.
-- Expired OIDC tokens or unmapped identity-provider groups.
+- Expired backend sessions, invalid CSRF tokens, or unmapped identity-provider groups.
 - Tenant claim missing or changed between identity providers.
 - Viewer attempts to export, invoke AI, or mutate cases.
 - Scheduled jobs that fail because source buckets/log groups change.
 - Long S3/CloudWatch imports that need asynchronous status and clear failure reporting.
+- Poison/retried ingest messages, queue backlog, DLQ redrive, and worker replacement.
+- Cross-tenant telemetry reads, self-approved response actions, duplicate EventBridge delivery, and tampered detection bundles.
 - Tenant admins assigning stale or missing source ownership.
+- Tenant admins needing access-review evidence without direct IdP administration.
+- Audit review filters returning no results or requiring offline cached evidence fallback.
 - Retained raw evidence packages that need Object Lock compatible storage and retention governance.
 - Detection rules that need safe testing before production use.
+- Duplicate, expired, cross-tenant, self-approved, or evidence-mismatched export requests.
 - Security Lake exports that need OCSF normalization and audit manifests.
+- Firehose partial delivery, stale cross-account credentials, expired evidence upload sessions, SCIM replay, service-account rotation, and connector endpoint abuse.
 - Asset ownership gaps that reduce response confidence.
 - Audit export and retention expectations in regulated environments.
 
@@ -133,19 +146,24 @@ Local development runs as `local-dev` admin when neither API key nor OIDC is con
 - S3 and CloudWatch ingest backend with SigV4.
 - Scheduled ingest jobs.
 - Async CloudWatch/S3 import status with completion/failure notifications.
-- Tenant-backed workspace, evidence, source, and case persistence with IndexedDB/local fallback.
-- Tenant admin screen for users, roles, and source ownership.
+- Tenant-backed workspace, evidence, source, and case persistence with scoped local fallback and opt-in AES-GCM browser evidence caching.
+- Tenant admin screen for users, roles, source ownership, access review, and audit review.
 - Full raw evidence package storage with local fallback and S3 Object Lock retention.
-- Enterprise command center for cited investigation answers, source discovery, threat intelligence, entity risk scoring, detection-as-code, Security Lake exports, asset context, replay, playbooks, evidence vault bundles, stakeholder reporting, policy exposure, governance, and quality metrics.
+- Enterprise command center for cited investigation answers, detection operations, production hardening, source discovery, threat intelligence, entity risk scoring, detection-as-code, Security Lake exports, asset context, replay, playbooks, evidence vault bundles, stakeholder reporting, policy exposure, governance, and quality metrics.
+- Platform operations workspace for behavior analytics, campaign assembly, retrospective hunts, AI investigation runs, cross-account onboarding, immutable direct uploads, connectors, crypto/AI posture, custom roles, and service accounts.
 - Case management and case audit history.
 - Detection explainability and tunable rule profiles.
 - Managed AWS source inventory with direct ingest and schedule creation.
-- RBAC-controlled portable investigation package export.
+- RBAC-controlled portable investigation package export with two-person, expiring, one-time approval.
 - Playable topology replay with timeline scrubbing.
 - OIDC/API-key backend access controls.
 - DynamoDB persistence option.
-- Append-only audit export.
+- Append-only audit review and export.
 - Bedrock feature flag and AI assistant.
 - ECS/Fargate Terraform production path.
+- Durable SQS workers, EventBridge response boundary, signed detection content, and multi-source telemetry correlation.
 - Smoke, integration, and UI workflow checks.
-- Optional Playwright visual regression specs for browser snapshot review.
+- Locked Playwright functional and visual regression coverage for desktop and mobile browser workflows.
+- Unified ingest policy, lossless checkpoints, malformed-line isolation, canonical SHA-256 event identity, and fail-closed evidence retention.
+- Immutable exact-version detection backtests, atomic case/rule transitions, governed response targets, and production MFA step-up.
+- Signed scanner attestations, version/checksum-bound packet provenance, durable stream outbox/retry/dead-letter/replay, distributed tenant quotas, and DynamoDB dual-read migration safety.

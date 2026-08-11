@@ -1,0 +1,51 @@
+{
+  "Records": [
+    {
+      "eventVersion": "1.09",
+      "eventID": "ct-normal-list",
+      "eventTime": "2026-07-16T19:58:00.000Z",
+      "eventSource": "ec2.amazonaws.com",
+      "eventName": "DescribeInstances",
+      "awsRegion": "us-east-1",
+      "recipientAccountId": "123456789012",
+      "sourceIPAddress": "10.0.5.10",
+      "userIdentity": {
+        "arn": "arn:aws:iam::123456789012:role/InventoryReader"
+      },
+      "requestParameters": {}
+    },
+    {
+      "eventVersion": "1.09",
+      "eventID": "ct-privilege",
+      "eventTime": "2026-07-16T20:00:00.000Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "AttachRolePolicy",
+      "awsRegion": "us-east-1",
+      "recipientAccountId": "123456789012",
+      "sourceIPAddress": "10.0.1.12",
+      "userIdentity": {
+        "arn": "arn:aws:iam::123456789012:user/compromised-admin"
+      },
+      "requestParameters": {
+        "roleArn": "arn:aws:iam::123456789012:role/ProductionAdmin",
+        "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess"
+      }
+    },
+    {
+      "eventVersion": "1.09",
+      "eventID": "ct-access-key",
+      "eventTime": "2026-07-16T20:00:18.000Z",
+      "eventSource": "iam.amazonaws.com",
+      "eventName": "CreateAccessKey",
+      "awsRegion": "us-east-1",
+      "recipientAccountId": "123456789012",
+      "sourceIPAddress": "10.0.1.12",
+      "userIdentity": {
+        "arn": "arn:aws:iam::123456789012:user/compromised-admin"
+      },
+      "requestParameters": {
+        "userName": "backup-automation"
+      }
+    }
+  ]
+}

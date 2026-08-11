@@ -11,6 +11,12 @@ SignalPrism NDR is a cloud-ready Network Detection and Response workbench for AW
 - [Configuration](CONFIGURATION.md): environment variables and local/cloud configuration patterns.
 - [Data And Detections](DATA_AND_DETECTIONS.md): supported inputs, normalized models, detection logic, and export formats.
 - [Bedrock AI Assistant](BEDROCK_AI.md): feature flag, prompt boundary, IAM, security posture, and usage.
+- [Security Hardening](SECURITY_HARDENING.md): trust boundaries, implemented controls, production gate, tests, and residual risks.
+- [Security Remediation Record](SECURITY_REMEDIATION_2026-07-17.md): closure evidence for the twelve deep-dive findings and additional hardening.
+- [Threat Model](THREAT_MODEL.md): protected assets, attacker personas, abuse cases, controls, and validation ownership.
+- [Deep-Dive Review](DEEP_DIVE_REVIEW_2026-07-17.md): historical adversarial product, architecture, and security assessment.
+- [Enterprise Platform](ENTERPRISE_PLATFORM.md): behavior analytics, campaigns, OCSF streaming, cross-account onboarding, SCIM, service accounts, connectors, response adapters, and rollout guidance.
+- [2026 Competitive Gap Analysis](COMPETITIVE_GAP_ANALYSIS_2026.md): evidence-based comparison with NDR leaders and a prioritized enterprise feature roadmap.
 - [Deployment](DEPLOYMENT.md): local, Docker, and AWS ECS/Fargate deployment flows.
 - [Operations Runbook](OPERATIONS_RUNBOOK.md): health checks, metrics, incidents, backups, and maintenance.
 - [Developer Guide](DEVELOPER_GUIDE.md): repository layout, scripts, testing, coding conventions, and release workflow.
