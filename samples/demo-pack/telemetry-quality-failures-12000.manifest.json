@@ -1,0 +1,91 @@
+{
+  "schema": "signalprism.demo-evidence.v1",
+  "product": "SignalPrism NDR",
+  "title": "Telemetry quality failures",
+  "file": "telemetry-quality-failures-12000.log",
+  "format": "AWS VPC Flow Logs v5 extended 29-field text",
+  "fixtureVersion": "2026.07.17",
+  "deterministicSeed": "0x5e11f00d",
+  "analystStory": "Use this file to demonstrate non-fatal parser errors, coverage blind spots, skipped delivery, and evidence-quality review.",
+  "physicalRecordLines": 12000,
+  "expectedParsedRecords": 11900,
+  "expectedParserIssues": 100,
+  "classificationCounts": {
+    "normal": 11000,
+    "quality": 1000
+  },
+  "scenarioCounts": {
+    "normal-web-egress": 4000,
+    "normal-internal-application": 3000,
+    "normal-cloud-services": 2000,
+    "normal-dns-ntp": 1500,
+    "normal-background-rejects": 500,
+    "quality-nodata": 500,
+    "quality-skipdata": 400,
+    "quality-malformed": 100
+  },
+  "timeRange": {
+    "start": "2026-07-16T00:00:00.000Z",
+    "end": "2026-07-16T13:46:00.000Z"
+  },
+  "attackWindow": null,
+  "primaryEntities": {
+    "compromisedApplicationHost": "10.40.20.44",
+    "dataExfiltrationSource": "10.40.30.90",
+    "productionBastion": "10.40.50.10",
+    "reconnaissanceSource": "198.51.100.66",
+    "bruteForceSource": "203.0.113.79",
+    "commandAndControl": "203.0.113.200",
+    "dnsTunnelResolver": "198.51.100.53",
+    "exfiltrationDestination": "198.51.100.250"
+  },
+  "expectedFindings": [
+    "Some lines were skipped",
+    "Skipped log data",
+    "No-data intervals present"
+  ],
+  "scenarios": {
+    "normal-web-egress": {
+      "classification": "normal",
+      "description": "Routine HTTPS and HTTP workload egress across web and application tiers.",
+      "count": 4000
+    },
+    "normal-internal-application": {
+      "classification": "normal",
+      "description": "Expected east-west application and service-mesh communication.",
+      "count": 3000
+    },
+    "normal-cloud-services": {
+      "classification": "normal",
+      "description": "Expected HTTPS traffic to representative cloud service endpoints.",
+      "count": 2000
+    },
+    "normal-dns-ntp": {
+      "classification": "normal",
+      "description": "Routine DNS and NTP traffic to link-local platform resolvers.",
+      "count": 1500
+    },
+    "normal-background-rejects": {
+      "classification": "normal",
+      "description": "Low-rate internet background noise rejected by perimeter controls.",
+      "count": 500
+    },
+    "quality-nodata": {
+      "classification": "quality",
+      "description": "Quiet ENI intervals reported as NODATA.",
+      "count": 500
+    },
+    "quality-skipdata": {
+      "classification": "quality",
+      "description": "Collection intervals reported as SKIPDATA and requiring source-health review.",
+      "count": 400
+    },
+    "quality-malformed": {
+      "classification": "quality",
+      "description": "Intentionally truncated records used to exercise parser issue handling.",
+      "count": 100
+    }
+  },
+  "sha256": "cec45ec8935d86022e1b219306fd1da6039ae71e6f8c9aa94ba280499b71ba7b",
+  "sizeBytes": 2953904
+}

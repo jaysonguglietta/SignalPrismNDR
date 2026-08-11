@@ -1,5 +1,6 @@
 import { createVerify, createPublicKey, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual, verify as verifySignature } from "node:crypto";
-import { gunzipSync } from "node:zlib";
+import { gunzip } from "node:zlib";
+import { promisify } from "node:util";
 import { createServer } from "node:http";
 import { mkdir, open, readFile, rename, writeFile, stat } from "node:fs/promises";
 import { createReadStream, existsSync } from "node:fs";
@@ -11,6 +12,7 @@ import { analyzeAiTraffic, analyzeCryptoPosture, backtestDetectionRule, buildAtt
 import { buildFirehoseRecords, buildOcsfBatch } from "./src/ocsf.mjs";
 import { connectorCatalog, connectorTestEvent, normalizeConnector, publicConnector } from "./src/connector-catalog.mjs";
 import { OCSF_PROFILES, buildAdvancedOperations, buildRetrospectiveMatches, evaluateInvestigationAgent, normalizeCaseTask, normalizePacketManifest, normalizeResponsePolicy, normalizeSensor, resolveOcsfProfile } from "./src/advanced-operations.mjs";
+import { validateReportSchedule } from "./src/executive-reporting.mjs";
 
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || (process.env.NDR_API_KEY || process.env.NDR_OIDC_ISSUER ? "0.0.0.0" : "127.0.0.1");
@@ -24,9 +26,13 @@ const PUBLIC_ASSET_PATHS = new Set([
   "/src/idb-store.js",
   "/src/backend-client.js",
   "/src/topology.js",
+  "/src/event-stitching.mjs",
+  "/src/network-heatmap.mjs",
+  "/src/executive-reporting.mjs",
   "/src/platform-ui.mjs",
   "/src/operations-ui.mjs"
 ]);
+const gunzipAsync = promisify(gunzip);
 const DATA_DIR = resolve(process.env.NDR_DATA_DIR || join(ROOT, ".ndr-data"));
 const JOBS_FILE = join(DATA_DIR, "jobs.json");
 const RUNS_FILE = join(DATA_DIR, "ingest-runs.json");
@@ -91,6 +97,7 @@ const EVIDENCE_ATTESTATION_SECRET = process.env.NDR_EVIDENCE_ATTESTATION_SECRET 
 const EVIDENCE_ATTESTATION_KEY_ID = process.env.NDR_EVIDENCE_ATTESTATION_KEY_ID || "signalprism-local-hmac-v1";
 const SESSION_COOKIE_NAME = process.env.NDR_SESSION_COOKIE_NAME || "signalprism_session";
 const SESSION_TTL_SECONDS = Number(process.env.NDR_SESSION_TTL_SECONDS || 8 * 60 * 60);
+const OIDC_SESSION_TTL_SECONDS = Number(process.env.NDR_OIDC_SESSION_TTL_SECONDS || (process.env.NODE_ENV === "production" ? 15 * 60 : SESSION_TTL_SECONDS));
 const SESSION_COOKIE_SECURE = process.env.NDR_SESSION_COOKIE_SECURE === "true";
 const CSRF_HEADER = "x-ndr-csrf";
 const RETAIN_RUNS = Number(process.env.NDR_RETAIN_RUNS || 50);
@@ -122,6 +129,8 @@ const TEST_AUTH_ENABLED = process.env.NDR_TEST_AUTH_ENABLED === "true";
 const ALLOW_LOCAL_DEV_ADMIN = process.env.NDR_ALLOW_LOCAL_DEV_ADMIN === "true";
 const ALLOW_DIRECT_INGEST = process.env.NDR_ALLOW_DIRECT_INGEST === "true";
 const PRODUCTION_HARDENING = process.env.NODE_ENV === "production" || process.env.NDR_PRODUCTION_HARDENING === "true";
+const TENANT_DIRECTORY_REQUIRED = process.env.NDR_TENANT_DIRECTORY_REQUIRED === "true" || (PRODUCTION_HARDENING && process.env.NDR_TENANT_DIRECTORY_REQUIRED !== "false");
+const ALLOW_DIRECTORY_EMAIL_MATCH = process.env.NDR_ALLOW_DIRECTORY_EMAIL_MATCH === "true" && !PRODUCTION_HARDENING;
 const BROWSER_EVIDENCE_CACHE = process.env.NDR_BROWSER_EVIDENCE_CACHE || (PRODUCTION_HARDENING ? "disabled" : "enabled");
 const AIR_GAPPED = process.env.NDR_AIR_GAPPED === "true";
 const REQUIRE_OIDC_TENANT_CLAIM = process.env.NDR_REQUIRE_OIDC_TENANT_CLAIM !== "false";
@@ -147,6 +156,7 @@ const MIN_JOB_INTERVAL_MINUTES = Number(process.env.NDR_MIN_JOB_INTERVAL_MINUTES
 const MAX_JOB_INTERVAL_MINUTES = Number(process.env.NDR_MAX_JOB_INTERVAL_MINUTES || 10080);
 const EXPORT_APPROVAL_TTL_SECONDS = Number(process.env.NDR_EXPORT_APPROVAL_TTL_SECONDS || 900);
 const MAX_PENDING_EXPORT_APPROVALS = Number(process.env.NDR_MAX_PENDING_EXPORT_APPROVALS || 100);
+const MAX_EXPORT_APPROVAL_BYTES = Number(process.env.NDR_MAX_EXPORT_APPROVAL_BYTES || 256 * 1024);
 const REQUIRE_SEPARATE_APPROVER = process.env.NDR_REQUIRE_SEPARATE_APPROVER !== "false";
 const QUEUE_URL = process.env.NDR_QUEUE_URL || "";
 const QUEUE_REGION = process.env.NDR_QUEUE_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || DDB_REGION;
@@ -159,6 +169,7 @@ const SCHEDULER_ROLE_ARN = process.env.NDR_SCHEDULER_ROLE_ARN || "";
 const QUEUE_ARN = process.env.NDR_QUEUE_ARN || "";
 const RESPONSE_EVENT_BUS = process.env.NDR_RESPONSE_EVENT_BUS || "";
 const RESPONSE_EXECUTION_ENABLED = process.env.NDR_RESPONSE_EXECUTION_ENABLED === "true";
+const RESPONSE_VERIFIER_SUBJECTS = new Set(String(process.env.NDR_RESPONSE_VERIFIER_SUBJECTS || "").split(",").map((value) => value.trim().toLowerCase()).filter(Boolean));
 const DETECTION_CONTENT_PUBLIC_KEY_B64 = process.env.NDR_DETECTION_CONTENT_PUBLIC_KEY_B64 || "";
 const FIREHOSE_STREAM_NAME = process.env.NDR_FIREHOSE_STREAM_NAME || "";
 const FIREHOSE_NETWORK_STREAM_NAME = process.env.NDR_FIREHOSE_NETWORK_STREAM_NAME || FIREHOSE_STREAM_NAME;
@@ -185,8 +196,13 @@ const SERVICE_ACCOUNT_PEPPER = process.env.NDR_SERVICE_ACCOUNT_PEPPER || SESSION
 const MAX_AI_AGENT_RUNS_PER_DAY = Math.max(1, Number(process.env.NDR_MAX_AI_AGENT_RUNS_PER_DAY || 100));
 const MAX_BEDROCK_CALLS_PER_DAY = Math.max(1, Number(process.env.NDR_MAX_BEDROCK_CALLS_PER_DAY || 250));
 const MAX_BEDROCK_RESERVED_TOKENS_PER_DAY = Math.max(BEDROCK_MAX_TOKENS, Number(process.env.NDR_MAX_BEDROCK_RESERVED_TOKENS_PER_DAY || 250_000));
+const MAX_TELEMETRY_EVENTS_PER_DAY = Math.max(1000, Number(process.env.NDR_MAX_TELEMETRY_EVENTS_PER_DAY || 1_000_000));
+const TELEMETRY_RETENTION_DAYS = Math.max(1, Math.min(3650, Number(process.env.NDR_TELEMETRY_RETENTION_DAYS || 30)));
 const DIRECT_UPLOAD_TTL_SECONDS = Math.max(60, Math.min(3600, Number(process.env.NDR_DIRECT_UPLOAD_TTL_SECONDS || 900)));
 const EVIDENCE_STAGING_BUCKET = process.env.NDR_EVIDENCE_STAGING_BUCKET || "";
+const EXPORT_PAYLOAD_BUCKET = process.env.NDR_EXPORT_PAYLOAD_BUCKET || EVIDENCE_STAGING_BUCKET;
+const EXPORT_PAYLOAD_PREFIX = process.env.NDR_EXPORT_PAYLOAD_PREFIX || "signalprism/export-approvals";
+const EXPORT_PAYLOAD_REGION = process.env.NDR_EXPORT_PAYLOAD_REGION || EVIDENCE_REGION;
 const EVIDENCE_SCAN_REQUIRED = process.env.NDR_EVIDENCE_SCAN_REQUIRED === "true";
 const EVIDENCE_STORAGE_REQUIRED = process.env.NDR_EVIDENCE_STORAGE_REQUIRED === "true" || PRODUCTION_HARDENING;
 const EVIDENCE_CHECKSUM_REQUIRED = process.env.NDR_EVIDENCE_CHECKSUM_REQUIRED === "true" || PRODUCTION_HARDENING;
@@ -328,7 +344,7 @@ const server = createServer(async (req, res) => {
   } catch (error) {
     METRICS.errors += 1;
     const { status, message } = publicErrorResponse(error);
-    logError("request_failed", { requestId: req.requestId, traceId: req.traceId, method: req.method, path: req.url, status, error: error.message || "Server error" });
+    logError("request_failed", { requestId: req.requestId, traceId: req.traceId, method: req.method, path: safeRequestPath(req), status, error: error.message || "Server error" });
     sendJson(res, status, { error: message });
   } finally {
     METRICS.requests += 1;
@@ -367,6 +383,21 @@ function validateStartupSecurity() {
   }
   if (PRODUCTION_HARDENING && (!API_KEY && !OIDC_ISSUER)) {
     throw new Error("Production hardening requires API key or OIDC authentication");
+  }
+  if (PRODUCTION_HARDENING && (STORE_MODE !== "dynamodb" || !DDB_TABLE)) {
+    throw new Error("Production hardening requires NDR_STORE=dynamodb and NDR_DDB_TABLE");
+  }
+  if (PRODUCTION_HARDENING && (!AUDIT_BUCKET || !AUDIT_OBJECT_STORAGE_REQUIRED)) {
+    throw new Error("Production hardening requires immutable S3 audit storage and NDR_AUDIT_OBJECT_STORAGE_REQUIRED=true");
+  }
+  if (PRODUCTION_HARDENING && !EXPORT_PAYLOAD_BUCKET) {
+    throw new Error("Production hardening requires NDR_EXPORT_PAYLOAD_BUCKET for short-lived approval payloads");
+  }
+  if (PRODUCTION_HARDENING && OIDC_ISSUER && !TENANT_DIRECTORY_REQUIRED) {
+    throw new Error("Production OIDC requires NDR_TENANT_DIRECTORY_REQUIRED=true");
+  }
+  if (PRODUCTION_HARDENING && RESPONSE_EXECUTION_ENABLED && !RESPONSE_VERIFIER_SUBJECTS.size) {
+    throw new Error("Production response execution requires NDR_RESPONSE_VERIFIER_SUBJECTS");
   }
   if (PRODUCTION_HARDENING && !process.env.NDR_SESSION_SECRET) {
     throw new Error("Production hardening requires a dedicated NDR_SESSION_SECRET");
@@ -660,7 +691,7 @@ async function routeApi(req, res) {
   if (req.method === "GET" && url.pathname === "/api/export-approvals") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     let approvals = await listTenantObjects("EXPORT_APPROVAL", req.principal.tenantId, EXPORT_APPROVALS_FILE, 250);
-    if (!isAdminPrincipal(req.principal)) approvals = approvals.filter((item) => item.requestedSubject === req.principal.subject || item.requestedBy === req.principal.email);
+    if (!isAdminPrincipal(req.principal)) approvals = approvals.filter((item) => item.requestedPrincipalId ? item.requestedPrincipalId === principalIdentity(req.principal) : item.requestedSubject === req.principal.subject);
     sendJson(res, 200, approvals.map(publicExportApproval));
     return;
   }
@@ -677,7 +708,8 @@ async function routeApi(req, res) {
   if (req.method === "GET" && url.pathname === "/api/enterprise/artifacts") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
     const type = String(url.searchParams.get("type") || "").trim().toUpperCase();
-    const artifacts = await listTenantObjects("ENTERPRISE_ARTIFACT", req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE, 250);
+    const artifacts = (await listAuthorizedTenantObjects("ENTERPRISE_ARTIFACT", req.principal, ENTERPRISE_ARTIFACTS_FILE, 250))
+      .filter((artifact) => enterpriseArtifactVisibleTo(artifact, req.principal));
     sendJson(res, 200, type ? artifacts.filter((artifact) => artifact.type === type) : artifacts);
     return;
   }
@@ -685,8 +717,10 @@ async function routeApi(req, res) {
   if (req.method === "POST" && url.pathname === "/api/enterprise/artifacts") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const artifact = attestEnterpriseArtifact(normalizeEnterpriseArtifact(body, req.principal));
-    await putTenantObject("ENTERPRISE_ARTIFACT", artifact.id, artifact, req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE);
+    const existing = body.id ? await getTenantObject("ENTERPRISE_ARTIFACT", body.id, req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE) : null;
+    if (existing && !isAdminPrincipal(req.principal) && !sameActor(existing.createdBy, req.principal, existing.createdPrincipalId)) throw publicError("Only the artifact creator or an admin can update this artifact", 403);
+    const artifact = attestEnterpriseArtifact(await governEnterpriseArtifact(normalizeEnterpriseArtifact(body, req.principal, existing), req.principal));
+    await putTenantObjectConditionalRevision("ENTERPRISE_ARTIFACT", artifact.id, artifact, req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE, existing ? Number(body.revision) : null);
     await appendAudit("enterprise.artifact.saved", { artifactId: artifact.id, type: artifact.type, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, body.id ? 200 : 201, artifact);
     return;
@@ -704,7 +738,7 @@ async function routeApi(req, res) {
   if (req.method === "GET" && url.pathname === "/api/telemetry/events") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
     const format = String(url.searchParams.get("format") || "").trim().toLowerCase();
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 1000);
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 1000);
     sendJson(res, 200, format ? events.filter((event) => event.format === format) : events);
     return;
   }
@@ -715,7 +749,14 @@ async function routeApi(req, res) {
     const parsed = parseTelemetryPayload(body.payload ?? body.events ?? body, body.format || "auto");
     if (parsed.total > 1000) throw publicError("API telemetry batches are limited to 1000 events", 413);
     if (!parsed.accepted) throw publicError(parsed.errors[0]?.error || "No valid telemetry events were supplied", 400);
-    const stored = await storeTelemetryEvents(parsed.events, req.principal, "api");
+    const sourceId = String(body.sourceId || "").trim();
+    if (isSourceRestrictedPrincipal(req.principal) && !sourceId) throw publicError("Source-scoped identities must provide a managed sourceId", 403);
+    if (sourceId) {
+      const source = await getTenantObject("SOURCE", sourceId, req.principal.tenantId, SOURCES_FILE);
+      if (!source) throw publicError("Managed source not found", 404);
+      assertSourceAccess(source, req.principal);
+    }
+    const stored = await storeTelemetryEvents(parsed.events.map((event) => ({ ...event, sourceId: sourceId || event.sourceId || "" })), req.principal, "api");
     await appendAudit("telemetry.events.ingested", { accepted: stored.length, rejected: parsed.errors.length, formats: [...new Set(stored.map((event) => event.format))], tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 201, { accepted: stored.length, rejected: parsed.errors.length, errors: parsed.errors.slice(0, 20), events: stored.slice(0, 100) });
     return;
@@ -755,7 +796,7 @@ async function routeApi(req, res) {
   if (req.method === "GET" && url.pathname === "/api/stream/deliveries") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
     const status = String(url.searchParams.get("status") || "").trim().toLowerCase();
-    const deliveries = await listTenantObjects("STREAM_DELIVERY", req.principal.tenantId, STREAM_DELIVERIES_FILE, 250);
+    const deliveries = await listAuthorizedTenantObjects("STREAM_DELIVERY", req.principal, STREAM_DELIVERIES_FILE, 250);
     sendJson(res, 200, deliveries.filter((delivery) => !status || delivery.status === status).map(publicStreamDelivery));
     return;
   }
@@ -763,7 +804,7 @@ async function routeApi(req, res) {
   if (req.method === "POST" && url.pathname.startsWith("/api/stream/deliveries/") && url.pathname.endsWith("/replay")) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const id = decodeURIComponent(url.pathname.split("/").at(-2));
-    const existing = await getTenantObject("STREAM_DELIVERY", id, req.principal.tenantId, STREAM_DELIVERIES_FILE);
+    const existing = await getAuthorizedTenantObject("STREAM_DELIVERY", id, req.principal, STREAM_DELIVERIES_FILE);
     if (!existing) throw publicError("Stream delivery not found", 404);
     const replayable = await putStreamDelivery({ ...existing, status: "pending", attempts: 0, pendingEventIds: existing.eventIds, nextAttemptAt: new Date().toISOString(), lastError: "", updatedAt: new Date().toISOString(), replayedAt: new Date().toISOString(), replayedBy: actorIdentity(req.principal) });
     METRICS.streamReplays += 1;
@@ -774,18 +815,18 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/correlations") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("CORRELATION", req.principal.tenantId, CORRELATIONS_FILE, 500));
+    sendJson(res, 200, await listAuthorizedTenantObjects("CORRELATION", req.principal, CORRELATIONS_FILE, 500));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/telemetry/correlate") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 5000);
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 5000);
     const findings = correlateTelemetry(events, { windowMinutes: body.windowMinutes });
     const now = new Date().toISOString();
     for (const item of findings) {
-      await putTenantObject("CORRELATION", item.id, { ...item, tenantId: req.principal.tenantId, updatedAt: now }, req.principal.tenantId, CORRELATIONS_FILE);
+      await putTenantObject("CORRELATION", item.id, { ...item, tenantId: req.principal.tenantId, sourceIds: [...new Set(events.map((event) => event.sourceId).filter(Boolean))], updatedAt: now }, req.principal.tenantId, CORRELATIONS_FILE);
     }
     METRICS.correlationsCreated += findings.length;
     await appendAudit("telemetry.correlation.completed", { eventCount: events.length, findingCount: findings.length, tenantId: req.principal.tenantId }, req.principal);
@@ -795,8 +836,8 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/analytics/behavior") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    const profiles = await listTenantObjects("BEHAVIOR_PROFILE", req.principal.tenantId, BEHAVIOR_PROFILES_FILE, 1000);
-    const findings = await listTenantObjects("BEHAVIOR_FINDING", req.principal.tenantId, BEHAVIOR_FINDINGS_FILE, 1000);
+    const profiles = await listAuthorizedTenantObjects("BEHAVIOR_PROFILE", req.principal, BEHAVIOR_PROFILES_FILE, 1000);
+    const findings = await listAuthorizedTenantObjects("BEHAVIOR_FINDING", req.principal, BEHAVIOR_FINDINGS_FILE, 1000);
     sendJson(res, 200, { profiles, findings });
     return;
   }
@@ -804,12 +845,13 @@ async function routeApi(req, res) {
   if (req.method === "POST" && url.pathname === "/api/analytics/behavior") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000);
-    const baselines = body.compareToBaseline === false ? [] : await listTenantObjects("BEHAVIOR_PROFILE", req.principal.tenantId, BEHAVIOR_PROFILES_FILE, 1000);
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000);
+    const baselines = body.compareToBaseline === false ? [] : await listAuthorizedTenantObjects("BEHAVIOR_PROFILE", req.principal, BEHAVIOR_PROFILES_FILE, 1000);
     const result = buildBehaviorAnalytics(events, { ...body, baselineProfiles: baselines });
     const now = new Date().toISOString();
-    for (const profile of result.profiles) await putTenantObject("BEHAVIOR_PROFILE", profile.id, { ...profile, tenantId: req.principal.tenantId, updatedAt: now }, req.principal.tenantId, BEHAVIOR_PROFILES_FILE);
-    for (const finding of result.findings) await putTenantObject("BEHAVIOR_FINDING", finding.id, { ...finding, tenantId: req.principal.tenantId, updatedAt: now }, req.principal.tenantId, BEHAVIOR_FINDINGS_FILE);
+    const sourceIds = [...new Set(events.map((event) => event.sourceId).filter(Boolean))];
+    for (const profile of result.profiles) await putTenantObject("BEHAVIOR_PROFILE", profile.id, { ...profile, tenantId: req.principal.tenantId, sourceIds, updatedAt: now }, req.principal.tenantId, BEHAVIOR_PROFILES_FILE);
+    for (const finding of result.findings) await putTenantObject("BEHAVIOR_FINDING", finding.id, { ...finding, tenantId: req.principal.tenantId, sourceIds, updatedAt: now }, req.principal.tenantId, BEHAVIOR_FINDINGS_FILE);
     METRICS.behaviorRuns += 1;
     await appendAudit("analytics.behavior.completed", { eventCount: result.eventCount, entityCount: result.entityCount, findingCount: result.findings.length, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, result);
@@ -818,7 +860,7 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/campaigns") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("CAMPAIGN", req.principal.tenantId, CAMPAIGNS_FILE, 500));
+    sendJson(res, 200, await listAuthorizedTenantObjects("CAMPAIGN", req.principal, CAMPAIGNS_FILE, 500));
     return;
   }
 
@@ -826,12 +868,13 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const [findings, anomalies, events] = await Promise.all([
-      listTenantObjects("CORRELATION", req.principal.tenantId, CORRELATIONS_FILE, 1000),
-      listTenantObjects("BEHAVIOR_FINDING", req.principal.tenantId, BEHAVIOR_FINDINGS_FILE, 1000),
-      listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000)
+      listAuthorizedTenantObjects("CORRELATION", req.principal, CORRELATIONS_FILE, 1000),
+      listAuthorizedTenantObjects("BEHAVIOR_FINDING", req.principal, BEHAVIOR_FINDINGS_FILE, 1000),
+      listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000)
     ]);
     const campaigns = buildAttackCampaigns({ findings, anomalies, events }, body);
-    for (const campaign of campaigns) await putTenantObject("CAMPAIGN", campaign.id, { ...campaign, tenantId: req.principal.tenantId, updatedAt: new Date().toISOString() }, req.principal.tenantId, CAMPAIGNS_FILE);
+    const sourceIds = [...new Set(events.map((event) => event.sourceId).filter(Boolean))];
+    for (const campaign of campaigns) await putTenantObject("CAMPAIGN", campaign.id, { ...campaign, tenantId: req.principal.tenantId, sourceIds, updatedAt: new Date().toISOString() }, req.principal.tenantId, CAMPAIGNS_FILE);
     METRICS.campaignsCreated += campaigns.length;
     await appendAudit("analytics.campaigns.built", { campaignCount: campaigns.length, signalCount: findings.length + anomalies.length, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, { campaignCount: campaigns.length, campaigns });
@@ -840,16 +883,16 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/hunts/retrospective") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("HUNT_RUN", req.principal.tenantId, HUNT_RUNS_FILE, 250));
+    sendJson(res, 200, await listAuthorizedTenantObjects("HUNT_RUN", req.principal, HUNT_RUNS_FILE, 250));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/hunts/retrospective") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000);
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000);
     const result = runRetrospectiveHunt(events, body.query, { limit: body.limit });
-    const stored = { ...result, tenantId: req.principal.tenantId, requestedBy: actorIdentity(req.principal), createdAt: result.startedAt, updatedAt: result.completedAt };
+    const stored = { ...result, tenantId: req.principal.tenantId, sourceIds: [...new Set(events.map((event) => event.sourceId).filter(Boolean))], requestedBy: actorIdentity(req.principal), requestedPrincipalId: principalIdentity(req.principal), createdAt: result.startedAt, updatedAt: result.completedAt };
     await putTenantObject("HUNT_RUN", stored.id, stored, req.principal.tenantId, HUNT_RUNS_FILE);
     METRICS.huntRuns += 1;
     await appendAudit("hunt.retrospective.completed", { huntRunId: stored.id, query: stored.normalizedQuery, scanned: stored.scanned, matchCount: stored.matchCount, tenantId: req.principal.tenantId }, req.principal);
@@ -859,15 +902,15 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/governance/traffic-posture") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("POSTURE_RESULT", req.principal.tenantId, POSTURE_RESULTS_FILE, 20));
+    sendJson(res, 200, await listAuthorizedTenantObjects("POSTURE_RESULT", req.principal, POSTURE_RESULTS_FILE, 20));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/governance/traffic-posture") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000);
-    const result = { id: `posture-${Date.now()}`, tenantId: req.principal.tenantId, ai: analyzeAiTraffic(events, body.aiPolicy || {}), crypto: analyzeCryptoPosture(events), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000);
+    const result = { id: `posture-${Date.now()}`, tenantId: req.principal.tenantId, sourceIds: [...new Set(events.map((event) => event.sourceId).filter(Boolean))], ai: analyzeAiTraffic(events, body.aiPolicy || {}), crypto: analyzeCryptoPosture(events), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     await putTenantObject("POSTURE_RESULT", result.id, result, req.principal.tenantId, POSTURE_RESULTS_FILE);
     await appendAudit("governance.traffic_posture.completed", { eventCount: events.length, aiObservations: result.ai.observedEvents, cryptoFindings: result.crypto.findings.length, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 200, result);
@@ -890,7 +933,7 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const snapshot = await loadAdvancedOperations(req.principal, body);
-    const record = { ...snapshot, id: `operations-${Date.now()}`, tenantId: req.principal.tenantId, createdAt: snapshot.generatedAt, updatedAt: snapshot.generatedAt };
+    const record = { ...snapshot, id: `operations-${Date.now()}`, tenantId: req.principal.tenantId, sourceIds: snapshot.sourceIds || [], createdAt: snapshot.generatedAt, updatedAt: snapshot.generatedAt };
     await putTenantObject("ADVANCED_ANALYTICS", record.id, record, req.principal.tenantId, ADVANCED_ANALYTICS_FILE);
     METRICS.operationsRuns += 1;
     await appendAudit("operations.analytics.completed", { advancedAnalyticsId: record.id, eventCount: snapshot.inputCounts.events, urgentSignals: snapshot.metrics.urgentSignals, tenantId: req.principal.tenantId }, req.principal);
@@ -909,9 +952,9 @@ async function routeApi(req, res) {
     const body = await readJson(req);
     const profile = resolveOcsfProfile(body.profile || "native-current");
     const [events, findings, campaigns] = await Promise.all([
-      listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, Math.max(1, Math.min(5000, Number(body.limit || 1000)))),
-      listTenantObjects("CORRELATION", req.principal.tenantId, CORRELATIONS_FILE, 1000),
-      listTenantObjects("CAMPAIGN", req.principal.tenantId, CAMPAIGNS_FILE, 500)
+      listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, Math.max(1, Math.min(5000, Number(body.limit || 1000)))),
+      listAuthorizedTenantObjects("CORRELATION", req.principal, CORRELATIONS_FILE, 1000),
+      listAuthorizedTenantObjects("CAMPAIGN", req.principal, CAMPAIGNS_FILE, 500)
     ]);
     const batch = buildOcsfBatch({ events, findings, campaigns }, ocsfMetadata(req.principal, profile.id));
     await appendAudit("schema.profile.validated", { profile: profile.id, recordCount: batch.recordCount, rejectedCount: batch.rejectedCount, tenantId: req.principal.tenantId }, req.principal);
@@ -999,7 +1042,7 @@ async function routeApi(req, res) {
     const end = body.end ? Date.parse(body.end) : Date.now();
     if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) throw new Error("Replay start and end times are invalid");
     const limit = Math.max(1, Math.min(5000, Number(body.limit || 1000)));
-    const events = (await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000))
+    const events = (await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000))
       .filter((event) => Date.parse(event.timestamp || 0) >= start && Date.parse(event.timestamp || 0) <= end)
       .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)).slice(0, limit);
     const profile = resolveOcsfProfile(body.profile || "native-current");
@@ -1022,7 +1065,7 @@ async function routeApi(req, res) {
     const body = await readJson(req);
     const query = String(body.query || "").trim();
     if (query.length < 3 || query.length > 1000) throw new Error("Search query must contain 3 to 1,000 characters");
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000);
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000);
     const result = await runInteractiveSearch(events, query, Math.max(1, Math.min(1000, Number(body.limit || 500))), req.principal);
     const now = new Date().toISOString();
     const job = { ...result, id: `search-${randomUUID()}`, tenantId: req.principal.tenantId, tier: HOT_SEARCH_MODE === "local" ? "local-hot" : HOT_SEARCH_MODE, status: "completed", requestedBy: actorIdentity(req.principal), createdAt: now, updatedAt: now };
@@ -1034,7 +1077,7 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/sensors") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("SENSOR", req.principal.tenantId, SENSORS_FILE, 500));
+    sendJson(res, 200, await listAuthorizedTenantObjects("SENSOR", req.principal, SENSORS_FILE, 500));
     return;
   }
 
@@ -1042,7 +1085,8 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin"])) return;
     const body = await readJson(req);
     const existing = body.id ? await getTenantObject("SENSOR", body.id, req.principal.tenantId, SENSORS_FILE) : null;
-    const sensor = normalizeSensor(body, req.principal, existing);
+    const sourceIds = await assertRequestedSourceIds(body.sourceIds || existing?.sourceIds || [], req.principal);
+    const sensor = { ...normalizeSensor(body, req.principal, existing), sourceIds };
     await putTenantObject("SENSOR", sensor.id, sensor, req.principal.tenantId, SENSORS_FILE);
     await appendAudit("sensor.saved", { sensorId: sensor.id, state: sensor.status, region: sensor.region, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, existing ? 200 : 201, sensor);
@@ -1051,13 +1095,15 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/packet-manifests") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("PACKET_MANIFEST", req.principal.tenantId, PACKET_MANIFESTS_FILE, 500));
+    sendJson(res, 200, await listAuthorizedTenantObjects("PACKET_MANIFEST", req.principal, PACKET_MANIFESTS_FILE, 500));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/packet-manifests") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
-    const manifest = await verifyPacketManifestObject(normalizePacketManifest(await readJson(req), req.principal), req.principal);
+    const body = await readJson(req);
+    const sourceIds = await assertRequestedSourceIds(body.sourceIds || (body.sourceId ? [body.sourceId] : []), req.principal);
+    const manifest = { ...await verifyPacketManifestObject(normalizePacketManifest(body, req.principal), req.principal), sourceIds, createdPrincipalId: principalIdentity(req.principal) };
     await putTenantObjectImmutable("PACKET_MANIFEST", manifest.id, manifest, req.principal.tenantId, PACKET_MANIFESTS_FILE);
     await appendAudit("packet.manifest.created", { packetManifestId: manifest.id, sha256: manifest.sha256, classification: manifest.classification, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 201, manifest);
@@ -1068,9 +1114,9 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin"])) return;
     if (!requireStepUp(req, res)) return;
     const id = decodeURIComponent(url.pathname.split("/").at(-2));
-    const manifest = await getTenantObject("PACKET_MANIFEST", id, req.principal.tenantId, PACKET_MANIFESTS_FILE);
+    const manifest = await getAuthorizedTenantObject("PACKET_MANIFEST", id, req.principal, PACKET_MANIFESTS_FILE);
     if (!manifest) throw publicError("Packet manifest not found", 404);
-    if (REQUIRE_SEPARATE_APPROVER && sameActor(manifest.createdBy, req.principal)) throw publicError("The packet manifest creator cannot authorize packet access", 403);
+    if (REQUIRE_SEPARATE_APPROVER && sameActor(manifest.createdBy, req.principal, manifest.createdPrincipalId)) throw publicError("The packet manifest creator cannot authorize packet access", 403);
     const body = await readJson(req);
     const reason = String(body.reason || "").trim();
     if (reason.length < 10 || reason.length > 1000) throw new Error("Packet access needs a 10 to 1,000 character reason");
@@ -1149,7 +1195,7 @@ async function routeApi(req, res) {
   if (req.method === "POST" && url.pathname === "/api/threat-intel/retromatch") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const feeds = await listTenantObjects("THREAT_INTEL_FEED", req.principal.tenantId, THREAT_INTEL_FEEDS_FILE, 250);
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000);
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000);
     const sightings = buildRetrospectiveMatches(events, feeds.filter((feed) => feed.status === "active").flatMap((feed) => feed.indicators || []));
     const now = new Date().toISOString();
     await putTenantObjectsBatch("THREAT_SIGHTING", sightings.map((sighting) => ({ ...sighting, tenantId: req.principal.tenantId, createdAt: now, updatedAt: now })), req.principal.tenantId, THREAT_SIGHTINGS_FILE);
@@ -1161,7 +1207,7 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/case-tasks") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    const tasks = await listTenantObjects("CASE_TASK", req.principal.tenantId, CASE_TASKS_FILE, 1000);
+    const tasks = await listAuthorizedTenantObjects("CASE_TASK", req.principal, CASE_TASKS_FILE, 1000);
     sendJson(res, 200, url.searchParams.get("caseId") ? tasks.filter((task) => task.caseId === url.searchParams.get("caseId")) : tasks);
     return;
   }
@@ -1169,9 +1215,12 @@ async function routeApi(req, res) {
   if (req.method === "POST" && url.pathname === "/api/case-tasks") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const existing = body.id ? await getTenantObject("CASE_TASK", body.id, req.principal.tenantId, CASE_TASKS_FILE) : null;
-    const task = normalizeCaseTask(body, req.principal, existing);
-    if (!(await getTenantObject("CASE", task.caseId, req.principal.tenantId, CASES_FILE))) throw publicError("Case not found", 404);
+    const existing = body.id ? await getAuthorizedTenantObject("CASE_TASK", body.id, req.principal, CASE_TASKS_FILE) : null;
+    if (body.id && !existing) throw publicError("Case task not found", 404);
+    const draft = normalizeCaseTask(body, req.principal, existing);
+    const caseRecord = await getAuthorizedTenantObject("CASE", draft.caseId, req.principal, CASES_FILE);
+    if (!caseRecord) throw publicError("Case not found", 404);
+    const task = { ...draft, sourceIds: caseRecord.sourceIds || [] };
     await putTenantObject("CASE_TASK", task.id, task, req.principal.tenantId, CASE_TASKS_FILE);
     await appendAudit("case.task.saved", { taskId: task.id, caseId: task.caseId, status: task.status, dueAt: task.dueAt, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, existing ? 200 : 201, task);
@@ -1181,7 +1230,7 @@ async function routeApi(req, res) {
   if (req.method === "DELETE" && url.pathname.startsWith("/api/case-tasks/")) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const id = decodeURIComponent(url.pathname.split("/").pop());
-    const task = await getTenantObject("CASE_TASK", id, req.principal.tenantId, CASE_TASKS_FILE);
+    const task = await getAuthorizedTenantObject("CASE_TASK", id, req.principal, CASE_TASKS_FILE);
     if (!task) throw publicError("Case task not found", 404);
     await deleteTenantObject("CASE_TASK", id, req.principal.tenantId, CASE_TASKS_FILE);
     await appendAudit("case.task.deleted", { taskId: id, caseId: task.caseId, tenantId: req.principal.tenantId }, req.principal);
@@ -1200,7 +1249,7 @@ async function routeApi(req, res) {
       "/api/agent/evaluations": ["AGENT_EVALUATION", AGENT_EVALUATIONS_FILE]
     };
     const [kind, file] = map[url.pathname];
-    sendJson(res, 200, await listTenantObjects(kind, req.principal.tenantId, file, 500));
+    sendJson(res, 200, kind === "AGENT_EVALUATION" ? await listAuthorizedTenantObjects(kind, req.principal, file, 500) : await listTenantObjects(kind, req.principal.tenantId, file, 500));
     return;
   }
 
@@ -1225,10 +1274,11 @@ async function routeApi(req, res) {
   if (req.method === "POST" && url.pathname === "/api/agent/evaluations") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const run = body.run || (body.runId ? await getTenantObject("AI_AGENT_RUN", body.runId, req.principal.tenantId, AI_AGENT_RUNS_FILE) : null);
+    if (!body.runId || body.run) throw publicError("A persisted runId is required; inline agent runs cannot be evaluated", 400);
+    const run = await getAuthorizedTenantObject("AI_AGENT_RUN", body.runId, req.principal, AI_AGENT_RUNS_FILE);
     if (!run) throw publicError("Investigation agent run not found", 404);
     const result = evaluateInvestigationAgent({ ...run, tenantId: req.principal.tenantId }, body.policy || {});
-    const record = { ...result, id: `agent-eval-${randomUUID()}`, tenantId: req.principal.tenantId, runId: run.id || body.runId || "inline", createdAt: result.evaluatedAt, updatedAt: result.evaluatedAt };
+    const record = { ...result, id: `agent-eval-${randomUUID()}`, tenantId: req.principal.tenantId, runId: run.id, runSha256: sha256Json(run), sourceIds: run.sourceIds || [], createdAt: result.evaluatedAt, updatedAt: result.evaluatedAt };
     await putTenantObject("AGENT_EVALUATION", record.id, record, req.principal.tenantId, AGENT_EVALUATIONS_FILE);
     await appendAudit("agent.evaluation.completed", { evaluationId: record.id, runId: record.runId, passed: record.passed, score: record.score, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 201, record);
@@ -1237,15 +1287,16 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/response-actions") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("RESPONSE_ACTION", req.principal.tenantId, RESPONSE_ACTIONS_FILE, 500));
+    sendJson(res, 200, await listAuthorizedTenantObjects("RESPONSE_ACTION", req.principal, RESPONSE_ACTIONS_FILE, 500));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/response-actions") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
-    const action = normalizeResponseAction(body, req.principal);
-    await assertResponseActionReferences(action, req.principal.tenantId);
+    const draft = { ...normalizeResponseAction(body, req.principal), requestedPrincipalId: principalIdentity(req.principal) };
+    const sourceIds = await assertResponseActionReferences(draft, req.principal);
+    const action = { ...draft, sourceIds };
     await putTenantObject("RESPONSE_ACTION", action.id, action, req.principal.tenantId, RESPONSE_ACTIONS_FILE);
     await appendAudit("response.action.requested", { responseActionId: action.id, type: action.type, target: action.target, caseId: action.caseId, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, 201, action);
@@ -1268,7 +1319,8 @@ async function routeApi(req, res) {
   }
 
   if (req.method === "POST" && url.pathname.startsWith("/api/response-actions/") && url.pathname.endsWith("/verify")) {
-    if (!requireRole(req, res, ["admin", "analyst"])) return;
+    if (!requireRole(req, res, ["admin"])) return;
+    if (!requireStepUp(req, res)) return;
     const id = decodeURIComponent(url.pathname.split("/").at(-2));
     const body = await readJson(req);
     sendJson(res, 200, await verifyResponseAction(id, body, req.principal));
@@ -1352,7 +1404,7 @@ async function routeApi(req, res) {
     const body = await readJson(req);
     const rule = await getTenantObject("DETECTION_RULE", id, req.principal.tenantId, DETECTION_RULES_FILE);
     if (!rule) throw publicError("Detection rule not found", 404);
-    const events = await listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000);
+    const events = await listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, 20_000);
     const result = backtestDetectionRule(rule, events, body.labels || {});
     const backtest = {
       ...result,
@@ -1384,17 +1436,20 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/workspaces") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("WORKSPACE", req.principal.tenantId, WORKSPACES_FILE));
+    sendJson(res, 200, await listAuthorizedTenantObjects("WORKSPACE", req.principal, WORKSPACES_FILE));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/workspaces") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
+    const existing = body.id ? await getTenantObject("WORKSPACE", body.id, req.principal.tenantId, WORKSPACES_FILE) : null;
+    if (existing && !await getAuthorizedTenantObject("WORKSPACE", body.id, req.principal, WORKSPACES_FILE)) throw publicError("Workspace not found", 404);
+    body.sourceIds = await assertRequestedSourceIds(body.sourceIds || [], req.principal);
     const workspace = normalizeWorkspace(body, req.principal);
     await putTenantObject("WORKSPACE", workspace.id, workspace, req.principal.tenantId, WORKSPACES_FILE);
     await appendAudit("workspace.saved", { workspaceId: workspace.id, name: workspace.name, tenantId: req.principal.tenantId }, req.principal);
-    sendJson(res, body.id ? 200 : 201, workspace);
+    sendJson(res, existing ? 200 : 201, workspace);
     return;
   }
 
@@ -1409,13 +1464,14 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/evidence-runs") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("EVIDENCE", req.principal.tenantId, EVIDENCE_FILE, 50));
+    sendJson(res, 200, await listAuthorizedTenantObjects("EVIDENCE", req.principal, EVIDENCE_FILE, 50));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/evidence-runs") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
+    body.sourceIds = await assertRequestedSourceIds(body.sourceIds || (body.sourceId ? [body.sourceId] : []), req.principal);
     const run = normalizeEvidenceRun(body, req.principal);
     run.package = body.evidenceUploadId
       ? await evidencePackageFromUpload(body.evidenceUploadId, req.principal)
@@ -1429,7 +1485,7 @@ async function routeApi(req, res) {
   if (req.method === "GET" && url.pathname.startsWith("/api/evidence-runs/") && url.pathname.endsWith("/package")) {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
     const id = decodeURIComponent(url.pathname.split("/").at(-2));
-    const run = await getTenantObject("EVIDENCE", id, req.principal.tenantId, EVIDENCE_FILE);
+    const run = await getAuthorizedTenantObject("EVIDENCE", id, req.principal, EVIDENCE_FILE);
     if (!run) {
       sendJson(res, 404, { error: "Evidence run not found" });
       return;
@@ -1592,7 +1648,7 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/evidence-uploads") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    const uploads = await listTenantObjects("EVIDENCE_UPLOAD", req.principal.tenantId, EVIDENCE_UPLOADS_FILE, 250);
+    const uploads = await listAuthorizedTenantObjects("EVIDENCE_UPLOAD", req.principal, EVIDENCE_UPLOADS_FILE, 250);
     sendJson(res, 200, uploads.map(publicEvidenceUpload));
     return;
   }
@@ -1641,24 +1697,27 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/cases") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("CASE", req.principal.tenantId, CASES_FILE));
+    sendJson(res, 200, await listAuthorizedTenantObjects("CASE", req.principal, CASES_FILE));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/cases") {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
+    const existing = body.id ? await getTenantObject("CASE", body.id, req.principal.tenantId, CASES_FILE) : null;
+    if (existing && !await getAuthorizedTenantObject("CASE", body.id, req.principal, CASES_FILE)) throw publicError("Case not found", 404);
+    body.sourceIds = await assertRequestedSourceIds(body.sourceIds || [], req.principal);
     const caseRecord = await normalizeCase(body, req.principal);
-    await putTenantObjectConditionalRevision("CASE", caseRecord.id, caseRecord, req.principal.tenantId, CASES_FILE, body.id ? Number(body.revision) : null);
-    await appendAudit(body.id ? "case.updated" : "case.created", { caseId: caseRecord.id, title: caseRecord.title, tenantId: req.principal.tenantId }, req.principal);
-    sendJson(res, body.id ? 200 : 201, caseRecord);
+    await putTenantObjectConditionalRevision("CASE", caseRecord.id, caseRecord, req.principal.tenantId, CASES_FILE, existing ? Number(body.revision) : null);
+    await appendAudit(existing ? "case.updated" : "case.created", { caseId: caseRecord.id, title: caseRecord.title, tenantId: req.principal.tenantId }, req.principal);
+    sendJson(res, existing ? 200 : 201, caseRecord);
     return;
   }
 
   if (req.method === "GET" && url.pathname.startsWith("/api/cases/") && url.pathname.endsWith("/audit")) {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
     const id = decodeURIComponent(url.pathname.split("/").at(-2));
-    const caseRecord = await getTenantObject("CASE", id, req.principal.tenantId, CASES_FILE);
+    const caseRecord = await getAuthorizedTenantObject("CASE", id, req.principal, CASES_FILE);
     if (!caseRecord) {
       sendJson(res, 404, { error: "Case not found" });
       return;
@@ -1685,13 +1744,24 @@ async function routeApi(req, res) {
       return;
     }
     const payload = governed.payload;
+    if (payload.reportType === "executive-brief") {
+      if (!payload.report || typeof payload.report !== "object") throw publicError("Executive report payload is required", 400);
+      if (!['pdf', 'csv', 'json'].includes(String(payload.format || ""))) throw publicError("Executive report format is invalid", 400);
+      if (String(payload.report.tenantId || req.principal.tenantId) !== req.principal.tenantId) throw publicError("Report tenant does not match the authenticated tenant", 403);
+    }
     const exported = {
       ...payload,
       tenantId: req.principal.tenantId,
       exportedBy: req.principal.email || req.principal.name || req.principal.subject || "unknown",
       exportedAt: new Date().toISOString()
     };
-    await appendAudit("investigation.exported", { workspace: payload.workspace?.name || payload.source || "current", approvalId: governed.approvalId || "", tenantId: req.principal.tenantId }, req.principal);
+    const isExecutiveBrief = payload.reportType === "executive-brief";
+    await appendAudit(isExecutiveBrief ? "executive_report.exported" : "investigation.exported", {
+      workspace: isExecutiveBrief ? payload.report?.id || "executive-brief" : payload.workspace?.name || payload.source || "current",
+      format: payload.format || "json",
+      approvalId: governed.approvalId || "",
+      tenantId: req.principal.tenantId
+    }, req.principal);
     sendJson(res, 200, exported);
     return;
   }
@@ -1714,10 +1784,10 @@ async function routeApi(req, res) {
     if (!requireRole(req, res, ["admin", "analyst"])) return;
     const body = await readJson(req);
     const [events, correlations, behaviorFindings, campaigns] = await Promise.all([
-      listTenantObjects("TELEMETRY_EVENT", req.principal.tenantId, TELEMETRY_EVENTS_FILE, Math.max(1, Math.min(20_000, Number(body.limit || 5000)))),
-      listTenantObjects("CORRELATION", req.principal.tenantId, CORRELATIONS_FILE, 1000),
-      listTenantObjects("BEHAVIOR_FINDING", req.principal.tenantId, BEHAVIOR_FINDINGS_FILE, 1000),
-      listTenantObjects("CAMPAIGN", req.principal.tenantId, CAMPAIGNS_FILE, 500)
+      listAuthorizedTenantObjects("TELEMETRY_EVENT", req.principal, TELEMETRY_EVENTS_FILE, Math.max(1, Math.min(20_000, Number(body.limit || 5000)))),
+      listAuthorizedTenantObjects("CORRELATION", req.principal, CORRELATIONS_FILE, 1000),
+      listAuthorizedTenantObjects("BEHAVIOR_FINDING", req.principal, BEHAVIOR_FINDINGS_FILE, 1000),
+      listAuthorizedTenantObjects("CAMPAIGN", req.principal, CAMPAIGNS_FILE, 500)
     ]);
     const batch = buildOcsfBatch({ events, findings: [...correlations, ...behaviorFindings], campaigns }, ocsfMetadata(req.principal, body.profile || "security-lake-1.3"));
     const contentSha256 = sha256Json(batch.records);
@@ -1727,7 +1797,7 @@ async function routeApi(req, res) {
       return;
     }
     const delivery = await publishOcsfBatch(batch, req.principal, { required: body.required === true });
-    const artifact = attestEnterpriseArtifact(normalizeEnterpriseArtifact({ type: "SECURITY_LAKE_PUBLICATION", title: `OCSF publication ${new Date().toISOString()}`, status: delivery.mode === "firehose" ? "published" : "preview", payload: { ...batch, records: batch.records.slice(0, 100), delivery } }, req.principal));
+    const artifact = attestEnterpriseArtifact(normalizeEnterpriseArtifact({ type: "SECURITY_LAKE_PUBLICATION", title: `OCSF publication ${new Date().toISOString()}`, status: delivery.mode === "firehose" ? "published" : "preview", sourceIds: [...new Set(events.map((event) => event.sourceId).filter(Boolean))], payload: { ...batch, records: batch.records.slice(0, 100), delivery } }, req.principal));
     await putTenantObject("ENTERPRISE_ARTIFACT", artifact.id, artifact, req.principal.tenantId, ENTERPRISE_ARTIFACTS_FILE);
     await appendAudit("security_lake.published", { recordCount: batch.recordCount, rejectedCount: batch.rejectedCount, deliveryMode: delivery.mode, artifactId: artifact.id, tenantId: req.principal.tenantId }, req.principal);
     sendJson(res, delivery.mode === "firehose" ? 202 : 200, { ...batch, records: batch.records.slice(0, 100), contentSha256, approvalId: governed.approvalId || "", delivery, artifactId: artifact.id });
@@ -1755,7 +1825,7 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/ai/investigations") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("AI_AGENT_RUN", req.principal.tenantId, AI_AGENT_RUNS_FILE, 250));
+    sendJson(res, 200, await listAuthorizedTenantObjects("AI_AGENT_RUN", req.principal, AI_AGENT_RUNS_FILE, 250));
     return;
   }
 
@@ -1806,7 +1876,7 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/jobs") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listJobs(req.principal.tenantId));
+    sendJson(res, 200, await filterSourceScopedRecords(await listJobs(req.principal.tenantId), req.principal));
     return;
   }
 
@@ -1882,13 +1952,13 @@ async function routeApi(req, res) {
 
   if (req.method === "GET" && url.pathname === "/api/job-runs") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listTenantObjects("JOB_RUN", req.principal.tenantId, JOB_RUNS_FILE, 100));
+    sendJson(res, 200, await listAuthorizedTenantObjects("JOB_RUN", req.principal, JOB_RUNS_FILE, 100));
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/api/runs") {
     if (!requireRole(req, res, ["admin", "analyst", "viewer"])) return;
-    sendJson(res, 200, await listRuns(req.principal.tenantId));
+    sendJson(res, 200, await filterSourceScopedRecords(await listRuns(req.principal.tenantId), req.principal));
     return;
   }
 
@@ -2123,7 +2193,7 @@ async function authorize(req, res) {
       sendJson(res, 403, { error: "Session CSRF token is required" });
       return false;
     }
-    req.principal = session.principal;
+    req.principal = await applyTenantDirectoryPolicy(session.principal);
     req.session = session;
     return true;
   }
@@ -2236,7 +2306,7 @@ async function exchangeOidcCode({ code, codeVerifier, redirectUri }, res) {
   const tokenForPrincipal = tokens.id_token || tokens.access_token;
   if (!tokenForPrincipal) throw publicError("SSO provider did not return a usable token.", 401);
   const principal = await applyTenantDirectoryPolicy(await verifyOidcToken(tokenForPrincipal));
-  const session = await createSession(principal, Number(tokens.expires_in || SESSION_TTL_SECONDS));
+  const session = await createSession(principal, Math.min(Number(tokens.expires_in || OIDC_SESSION_TTL_SECONDS), OIDC_SESSION_TTL_SECONDS));
   await appendAudit("auth.login", { authType: "oidc", tenantId: principal.tenantId }, principal);
   setSessionCookie(res, session.cookieValue, session.maxAge);
   return sessionResponse(principal, session);
@@ -2465,6 +2535,7 @@ async function verifyOidcToken(token) {
   if (!verifier.verify(publicKey, base64UrlDecode(encodedSignature))) throw new Error("Signature mismatch");
   return {
     subject: payload.sub,
+    issuer: payload.iss,
     email: payload.email,
     name: payload.name || payload.preferred_username || payload.email || payload.sub,
     roles: rolesFromClaims(payload),
@@ -2480,6 +2551,7 @@ function normalizePrincipal(value = {}, authType = "test") {
   const roles = Array.isArray(value.roles) && value.roles.length ? value.roles : ["viewer"];
   return {
     subject: value.subject || value.sub || "test-user",
+    issuer: value.issuer || value.iss || (value.authType === "oidc" ? OIDC_ISSUER : ""),
     email: value.email || "",
     name: value.name || value.email || value.subject || "Test User",
     roles,
@@ -2675,9 +2747,19 @@ async function revokeSession(session) {
 
 async function applyTenantDirectoryPolicy(principal) {
   const users = await listTenantObjects("TENANT_USER", principal.tenantId, TENANT_USERS_FILE, 500);
-  const identities = new Set([principal.subject, principal.email].filter(Boolean).map((value) => String(value).toLowerCase()));
-  const user = users.find((item) => identities.has(String(item.id || "").toLowerCase()) || identities.has(String(item.email || "").toLowerCase()));
-  if (!user) return principal;
+  const subject = String(principal.subject || "").toLowerCase();
+  const issuer = normalizeIssuer(principal.issuer || (principal.authType === "oidc" ? OIDC_ISSUER : ""));
+  const email = String(principal.email || "").toLowerCase();
+  const user = users.find((item) => {
+    const stableSubject = String(item.subject || item.externalId || "").toLowerCase();
+    const stableIssuer = normalizeIssuer(item.issuer || issuer);
+    if (subject && stableSubject === subject && (!item.issuer || stableIssuer === issuer)) return true;
+    return ALLOW_DIRECTORY_EMAIL_MATCH && email && String(item.email || "").toLowerCase() === email;
+  });
+  if (!user) {
+    if (principal.authType === "oidc" && TENANT_DIRECTORY_REQUIRED) throw publicError("Tenant directory membership is required", 403);
+    return principal;
+  }
   if (["disabled", "suspended", "revoked"].includes(String(user.status || "").toLowerCase())) {
     throw publicError("Tenant access is disabled", 403);
   }
@@ -2700,6 +2782,7 @@ async function applyTenantDirectoryPolicy(principal) {
     sourceAccessMode: ["all", "assigned", "group"].includes(user.sourceAccessMode) ? user.sourceAccessMode : (user.role === "admin" ? "all" : "assigned"),
     sourceGroupIds: user.sourceGroupIds || [],
     directoryUserId: user.id,
+    issuer: principal.issuer || user.issuer || "",
     name: user.name || principal.name,
     email: user.email || principal.email
   };
@@ -2790,7 +2873,15 @@ async function checkRateLimit(req, res) {
 async function checkPrincipalRateLimit(req, res) {
   if (!req.principal || req.principal.authType === "public") return true;
   const identity = req.principal.subject || req.principal.email || "unknown";
-  return consumeRateBucket(`principal:${sanitizeTenantId(req.principal.tenantId)}:${identity}`, RATE_LIMIT_MAX, res);
+  return consumeRateBucket(`principal:${sanitizeTenantId(req.principal.tenantId)}:${identity}`, RATE_LIMIT_MAX, res, requestRateCost(req));
+}
+
+function requestRateCost(req) {
+  if (req.method === "GET") return 1;
+  const pathname = new URL(req.url, "http://localhost").pathname;
+  if (/^\/api\/(?:ai\/|telemetry\/correlate|analytics\/|campaigns\/build|hunts\/|search\/jobs|security-lake\/publish)/.test(pathname)) return 20;
+  if (/^\/api\/(?:telemetry\/events|ingest\/|jobs\/.*\/run)/.test(pathname)) return 10;
+  return 2;
 }
 
 function requestClientAddress(req) {
@@ -2801,15 +2892,15 @@ function requestClientAddress(req) {
   return req.socket.remoteAddress || "unknown";
 }
 
-async function consumeRateBucket(key, limit, res) {
-  if (DISTRIBUTED_RATE_LIMIT) return consumeDistributedRateBucket(key, limit, res);
+async function consumeRateBucket(key, limit, res, cost = 1) {
+  if (DISTRIBUTED_RATE_LIMIT) return consumeDistributedRateBucket(key, limit, res, cost);
   const now = Date.now();
   const bucket = rateBuckets.get(key) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
   if (now > bucket.resetAt) {
     bucket.count = 0;
     bucket.resetAt = now + RATE_LIMIT_WINDOW_MS;
   }
-  bucket.count += 1;
+  bucket.count += Math.max(1, Number(cost) || 1);
   rateBuckets.set(key, bucket);
   if (rateBuckets.size > RATE_LIMIT_MAX_IDENTITIES) pruneRateBuckets(now);
   if (bucket.count > limit) {
@@ -2820,7 +2911,7 @@ async function consumeRateBucket(key, limit, res) {
   return true;
 }
 
-async function consumeDistributedRateBucket(key, limit, res) {
+async function consumeDistributedRateBucket(key, limit, res, cost = 1) {
   requireDynamo();
   const now = Date.now();
   const window = Math.floor(now / RATE_LIMIT_WINDOW_MS);
@@ -2834,7 +2925,7 @@ async function consumeDistributedRateBucket(key, limit, res) {
       Key: { pk: { S: `RATE#${createHash("sha256").update(key).digest("hex")}` }, sk: { S: String(window) } },
       UpdateExpression: "SET expiresAt = :expiresAt, #ttl = :ttl ADD #count :one",
       ExpressionAttributeNames: { "#count": "count", "#ttl": "ttl" },
-      ExpressionAttributeValues: { ":one": { N: "1" }, ":expiresAt": { N: String(resetAt) }, ":ttl": { N: String(Math.ceil(resetAt / 1000) + 60) } },
+      ExpressionAttributeValues: { ":one": { N: String(Math.max(1, Number(cost) || 1)) }, ":expiresAt": { N: String(resetAt) }, ":ttl": { N: String(Math.ceil(resetAt / 1000) + 60) } },
       ReturnValues: "ALL_NEW"
     }
   });
@@ -2886,6 +2977,38 @@ async function reserveAiUsage(principal, { agentRuns = 0, bedrockCalls = 0, rese
     if (next.agentRuns > MAX_AI_AGENT_RUNS_PER_DAY || next.bedrockCalls > MAX_BEDROCK_CALLS_PER_DAY || next.reservedTokens > MAX_BEDROCK_RESERVED_TOKENS_PER_DAY) throw publicError("Daily tenant AI budget reached", 429);
     if (index >= 0) records.splice(index, 1, next);
     else records.unshift(next);
+    await writeJsonFile(AI_USAGE_FILE, records.slice(0, 4000));
+  });
+}
+
+async function reserveTelemetryUsage(principal, count) {
+  const increment = Math.max(0, Number(count) || 0);
+  if (!increment) return;
+  const date = new Date().toISOString().slice(0, 10);
+  const expiresAt = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000) + 2 * 86400;
+  if (STORE_MODE === "dynamodb") {
+    try {
+      await awsJsonRequest({ service: "dynamodb", region: DDB_REGION, target: "DynamoDB_20120810.UpdateItem", payload: {
+        TableName: DDB_TABLE,
+        Key: { pk: { S: tenantPartition("TELEMETRY_QUOTA", principal.tenantId) }, sk: { S: date } },
+        UpdateExpression: "SET #ttl = :ttl ADD #count :increment",
+        ConditionExpression: "attribute_not_exists(#count) OR #count <= :remaining",
+        ExpressionAttributeNames: { "#count": "count", "#ttl": "ttl" },
+        ExpressionAttributeValues: { ":increment": { N: String(increment) }, ":remaining": { N: String(MAX_TELEMETRY_EVENTS_PER_DAY - increment) }, ":ttl": { N: String(expiresAt) } }
+      } });
+      return;
+    } catch (error) {
+      if (/ConditionalCheckFailedException/i.test(error.message)) throw publicError("Daily tenant telemetry quota reached", 429);
+      throw error;
+    }
+  }
+  await withFileLock(AI_USAGE_FILE, async () => {
+    const records = await readJsonFile(AI_USAGE_FILE, []);
+    const index = records.findIndex((record) => sameTenant(record, principal.tenantId) && record.id === date);
+    const current = index >= 0 ? records[index] : { id: date, tenantId: principal.tenantId, agentRuns: 0, bedrockCalls: 0, reservedTokens: 0, telemetryEvents: 0 };
+    const next = { ...current, telemetryEvents: Number(current.telemetryEvents || 0) + increment, updatedAt: new Date().toISOString() };
+    if (next.telemetryEvents > MAX_TELEMETRY_EVENTS_PER_DAY) throw publicError("Daily tenant telemetry quota reached", 429);
+    if (index >= 0) records.splice(index, 1, next); else records.unshift(next);
     await writeJsonFile(AI_USAGE_FILE, records.slice(0, 4000));
   });
 }
@@ -2966,6 +3089,58 @@ function filterSourcesForPrincipal(sources = [], principal = {}) {
       return false;
     }
   });
+}
+
+function recordSourceIds(record = {}) {
+  return [...new Set([
+    record.sourceId,
+    ...(Array.isArray(record.sourceIds) ? record.sourceIds : []),
+    ...(Array.isArray(record.sources) ? record.sources.map((source) => typeof source === "string" ? source : source?.id) : []),
+    record.payload?.sourceId,
+    ...(Array.isArray(record.payload?.sourceIds) ? record.payload.sourceIds : [])
+  ].filter(Boolean).map(String))];
+}
+
+async function allowedSourceIdsForPrincipal(principal = {}) {
+  if (!isSourceRestrictedPrincipal(principal)) return null;
+  const sources = await listTenantObjects("SOURCE", principal.tenantId, SOURCES_FILE, 1000);
+  return new Set(filterSourcesForPrincipal(sources, principal).map((source) => String(source.id)));
+}
+
+async function filterSourceScopedRecords(records = [], principal = {}) {
+  const allowed = await allowedSourceIdsForPrincipal(principal);
+  if (allowed === null) return records;
+  return records.filter((record) => {
+    const sourceIds = recordSourceIds(record);
+    return sourceIds.length > 0 && sourceIds.every((sourceId) => allowed.has(sourceId));
+  });
+}
+
+async function listAuthorizedTenantObjects(kind, principal, file, limit = 100) {
+  return filterSourceScopedRecords(await listTenantObjects(kind, principal.tenantId, file, limit), principal);
+}
+
+async function getAuthorizedTenantObject(kind, id, principal, file) {
+  const record = await getTenantObject(kind, id, principal.tenantId, file);
+  if (!record) return null;
+  const [authorized] = await filterSourceScopedRecords([record], principal);
+  return authorized || null;
+}
+
+async function assertRequestedSourceIds(sourceIds = [], principal = {}) {
+  const ids = [...new Set((sourceIds || []).filter(Boolean).map(String))];
+  if (isSourceRestrictedPrincipal(principal) && !ids.length) throw publicError("Source-scoped records require at least one managed source", 403);
+  for (const id of ids) {
+    const source = await getTenantObject("SOURCE", id, principal.tenantId, SOURCES_FILE);
+    if (!source) throw publicError("Managed source not found", 404);
+    assertSourceAccess(source, principal);
+  }
+  return ids;
+}
+
+function isSourceRestrictedPrincipal(principal = {}) {
+  if (isAdminPrincipal(principal) || principal.sourceAccessMode === "all") return false;
+  return true;
 }
 
 function publicSource(source = {}) {
@@ -3167,11 +3342,11 @@ async function processIngestResult(result, source, principal = {}) {
   const correlations = correlateTelemetry(analysisWindow).map((finding) => ({ ...finding, tenantId, sourceIds: source?.id ? [source.id] : [], createdAt: finding.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() }));
   await putTenantObjectsBatch("CORRELATION", correlations, tenantId, CORRELATIONS_FILE);
   const behavior = buildBehaviorAnalytics(analysisWindow);
-  const behaviorProfiles = (behavior.profiles || []).map((profile) => ({ ...profile, tenantId, updatedAt: new Date().toISOString(), createdAt: profile.createdAt || new Date().toISOString() }));
-  const behaviorFindings = (behavior.findings || []).map((finding) => ({ ...finding, tenantId, updatedAt: new Date().toISOString(), createdAt: finding.createdAt || new Date().toISOString() }));
+  const behaviorProfiles = (behavior.profiles || []).map((profile) => ({ ...profile, tenantId, sourceIds: source?.id ? [source.id] : [], updatedAt: new Date().toISOString(), createdAt: profile.createdAt || new Date().toISOString() }));
+  const behaviorFindings = (behavior.findings || []).map((finding) => ({ ...finding, tenantId, sourceIds: source?.id ? [source.id] : [], updatedAt: new Date().toISOString(), createdAt: finding.createdAt || new Date().toISOString() }));
   await putTenantObjectsBatch("BEHAVIOR_PROFILE", behaviorProfiles, tenantId, BEHAVIOR_PROFILES_FILE);
   await putTenantObjectsBatch("BEHAVIOR_FINDING", behaviorFindings, tenantId, BEHAVIOR_FINDINGS_FILE);
-  const campaigns = buildAttackCampaigns({ findings: correlations, anomalies: behaviorFindings, events: analysisWindow }).map((campaign) => ({ ...campaign, tenantId, updatedAt: new Date().toISOString() }));
+  const campaigns = buildAttackCampaigns({ findings: correlations, anomalies: behaviorFindings, events: analysisWindow }).map((campaign) => ({ ...campaign, tenantId, sourceIds: source?.id ? [source.id] : [], updatedAt: new Date().toISOString() }));
   await putTenantObjectsBatch("CAMPAIGN", campaigns, tenantId, CAMPAIGNS_FILE);
   const status = result.text && parsed.accepted === 0 ? "quarantined" : parsed.errors.length || result.partial ? "partial" : "ready";
   const message = status === "quarantined" ? "Raw evidence was retained, but no records passed normalization." : status === "partial" ? "Ingest completed with parser errors or additional source pages pending." : "Telemetry is normalized and available for investigation.";
@@ -3317,19 +3492,11 @@ async function dispatchJobNotification(run, principal = {}) {
 
 async function enqueueJobRun(job, run, principal = {}) {
   const message = {
-    version: 1,
+    version: 2,
     type: "managed-ingest",
     runId: run.id,
     tenantId: run.tenantId,
-    job: {
-      id: job.id,
-      tenantId: run.tenantId,
-      name: job.name,
-      sourceId: job.sourceId || "",
-      type: job.type,
-      config: job.config
-    },
-    principal: workerPrincipal(principal, run.tenantId),
+    jobId: job.id,
     enqueuedAt: new Date().toISOString()
   };
   await sqsAction("SendMessage", {
@@ -3371,7 +3538,7 @@ async function processQueueMessage(message) {
   let payload;
   try {
     payload = JSON.parse(message.body);
-    if (payload?.version !== 1 || !["managed-ingest", "scheduled-ingest"].includes(payload?.type) || (payload.type === "managed-ingest" && !payload.runId) || !payload.tenantId || !payload.job?.id) {
+    if (payload?.version !== 2 || !["managed-ingest", "scheduled-ingest"].includes(payload?.type) || (payload.type === "managed-ingest" && !payload.runId) || !payload.tenantId || !payload.jobId) {
       throw new Error("Unsupported queue message contract");
     }
   } catch (error) {
@@ -3380,13 +3547,22 @@ async function processQueueMessage(message) {
     return;
   }
   const tenantId = sanitizeTenantId(payload.tenantId);
+  const job = (await listJobs(tenantId)).find((item) => String(item.id) === String(payload.jobId));
+  if (!job || !job.enabled) {
+    METRICS.queueMessagesFailed += 1;
+    logError("queue_job_missing", { messageId: message.messageId, jobId: payload.jobId, tenantId });
+    await deleteQueueMessage(message.receiptHandle);
+    return;
+  }
+  if (job.tenantId !== tenantId) throw new Error("Queue job tenant mismatch");
+  if (job.sourceId && !await getTenantObject("SOURCE", job.sourceId, tenantId, SOURCES_FILE)) throw new Error("Queue job source no longer exists");
   let run;
   if (payload.type === "scheduled-ingest") {
     const runId = randomUUID();
     const runSlot = await acquireActiveRunSlot(tenantId, runId);
     if (runSlot < 0) throw publicError(`Tenant active ingest limit of ${MAX_ACTIVE_RUNS_PER_TENANT} reached`, 429);
     const now = new Date().toISOString();
-    run = { id: runId, tenantId, jobId: payload.job.id, jobName: payload.job.name, sourceId: payload.job.sourceId || "", type: payload.job.type, status: "running", message: "Scheduled ingest worker started", progress: 10, createdBy: "eventbridge-scheduler", createdAt: now, updatedAt: now, runSlot };
+    run = { id: runId, tenantId, jobId: job.id, jobName: job.name, sourceId: job.sourceId || "", type: job.type, status: "running", message: "Scheduled ingest worker started", progress: 10, createdBy: "eventbridge-scheduler", createdPrincipalId: "system#eventbridge-scheduler", createdAt: now, updatedAt: now, runSlot };
     await putTenantObject("JOB_RUN", run.id, run, tenantId, JOB_RUNS_FILE);
   } else {
     run = await getTenantObject("JOB_RUN", payload.runId, tenantId, JOB_RUNS_FILE);
@@ -3400,7 +3576,7 @@ async function processQueueMessage(message) {
     await deleteQueueMessage(message.receiptHandle);
     return;
   }
-  const principal = workerPrincipal(payload.principal, tenantId);
+  const principal = workerPrincipal({ subject: "queue-worker", name: "SignalPrism queue worker", roles: ["admin"], authType: "system" }, tenantId);
   const processing = { ...run, status: "running", message: `Worker processing attempt ${message.receiveCount}`, progress: 10, updatedAt: new Date().toISOString() };
   await putTenantObject("JOB_RUN", processing.id, processing, tenantId, JOB_RUNS_FILE);
   const visibilityHeartbeat = setInterval(() => {
@@ -3408,7 +3584,7 @@ async function processQueueMessage(message) {
   }, Math.max(10_000, Math.floor(QUEUE_VISIBILITY_SECONDS * 1000 / 3)));
   visibilityHeartbeat.unref?.();
   try {
-    const result = await runJob({ ...payload.job, tenantId }, principal);
+    const result = await runJob(job, principal);
     await completeAsyncJobRun(processing, result, principal);
     await deleteQueueMessage(message.receiptHandle);
     METRICS.queueMessagesProcessed += 1;
@@ -3534,7 +3710,10 @@ async function putTenantObjectsBatch(kind, values, tenantId, file) {
   await withFileLock(file, async () => {
     const existing = await readJsonFile(file, []);
     const replacementIds = new Set(records.map((record) => String(record.id)));
-    const retained = existing.filter((item) => !(sameTenant(item, tenantId) && replacementIds.has(String(item.id))));
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const retained = existing
+      .filter((item) => !(sameTenant(item, tenantId) && replacementIds.has(String(item.id))))
+      .filter((item) => kind !== "TELEMETRY_EVENT" || !item.ttl || Number(item.ttl) > nowSeconds);
     await writeJsonFile(file, [...records, ...retained]);
   });
   return records;
@@ -3586,6 +3765,7 @@ function normalizeWorkspace(body = {}, principal = {}) {
     entities: Number(body.entities || 0),
     bytes: Number(body.bytes || 0),
     sourceCount: Number(body.sourceCount || 0),
+    sourceIds: Array.isArray(body.sourceIds) ? [...new Set(body.sourceIds.map(String))].slice(0, 100) : [],
     sources: Array.isArray(body.sources) ? body.sources.slice(0, 100) : [],
     hunts: Array.isArray(body.hunts) ? body.hunts.slice(0, 50) : [],
     enrichment: body.enrichment && typeof body.enrichment === "object" ? body.enrichment : {},
@@ -3608,6 +3788,8 @@ function normalizeEvidenceRun(body = {}, principal = {}) {
     highCount: Number(body.highCount || (analysis.detections || []).filter((item) => item.severity === "high").length || 0),
     bytes: Number(body.bytes || analysis.totals?.bytes || 0),
     sourceLabel: String(body.sourceLabel || body.fileName || ""),
+    sourceId: String(body.sourceId || "").slice(0, 180),
+    sourceIds: Array.isArray(body.sourceIds) ? [...new Set(body.sourceIds.map(String))].slice(0, 100) : (body.sourceId ? [String(body.sourceId)] : []),
     evidenceUploadId: String(body.evidenceUploadId || "").slice(0, 180),
     recordsSample: records,
     analysisSummary: {
@@ -3625,7 +3807,7 @@ function normalizeEvidenceRun(body = {}, principal = {}) {
 }
 
 async function evidencePackageFromUpload(id, principal) {
-  const upload = await getTenantObject("EVIDENCE_UPLOAD", id, principal.tenantId, EVIDENCE_UPLOADS_FILE);
+  const upload = await getAuthorizedTenantObject("EVIDENCE_UPLOAD", id, principal, EVIDENCE_UPLOADS_FILE);
   if (!upload) throw publicError("Evidence upload was not found", 404);
   if (!["quarantined", "verified", "complete"].includes(upload.status)) throw publicError("Evidence upload is not ready to link", 409);
   return {
@@ -3896,6 +4078,13 @@ async function verifyResponseAction(id, body, principal) {
   const action = await getTenantObject("RESPONSE_ACTION", id, principal.tenantId, RESPONSE_ACTIONS_FILE);
   if (!action) throw publicError("Response action not found", 404);
   if (!['executed', 'approved', 'verification-failed'].includes(action.status)) throw publicError("Response action is not ready for verification", 409);
+  if (REQUIRE_SEPARATE_APPROVER && (
+    sameActor(action.requestedBy, principal, action.requestedPrincipalId || action.requestedSubject) ||
+    sameActor(action.approvedBy, principal, action.approvedPrincipalId)
+  )) throw publicError("Response verification requires an independent verifier", 403);
+  if (RESPONSE_VERIFIER_SUBJECTS.size && !RESPONSE_VERIFIER_SUBJECTS.has(String(principal.subject || "").toLowerCase())) {
+    throw publicError("Identity is not an approved response verifier", 403);
+  }
   const successful = body.successful !== false;
   const now = new Date().toISOString();
   const updated = {
@@ -3905,6 +4094,7 @@ async function verifyResponseAction(id, body, principal) {
       successful,
       evidence: String(body.evidence || "").trim().slice(0, 2000),
       verifiedBy: actorIdentity(principal),
+      verifiedPrincipalId: principalIdentity(principal),
       verifiedAt: now
     },
     updatedAt: now
@@ -3980,7 +4170,7 @@ function assertResponseActionPending(action, principal = {}) {
   if (!action) throw publicError("Response action not found", 404);
   if (action.status !== "pending") throw publicError("Response action is no longer pending", 409);
   if (!Number.isFinite(Date.parse(action.expiresAt || "")) || Date.now() >= Date.parse(action.expiresAt)) throw publicError("Response action approval window has expired", 409);
-  if (REQUIRE_SEPARATE_APPROVER && sameActor(action.requestedBy, principal)) throw publicError("The requester cannot approve their own response action", 403);
+  if (REQUIRE_SEPARATE_APPROVER && sameActor(action.requestedBy, principal, action.requestedPrincipalId || action.requestedSubject)) throw publicError("The requester cannot approve their own response action", 403);
 }
 
 function buildClaimedResponseAction(action, principal = {}, policy = null) {
@@ -3996,7 +4186,7 @@ function buildClaimedResponseAction(action, principal = {}, policy = null) {
     verificationMinutes: policy.verificationMinutes,
     version: policy.updatedAt
   } : { id: "default", mode: "approve", version: "built-in" };
-  return { ...action, status: "executing", approvedBy: actorIdentity(principal), approvedAt: now, policySnapshot, policySnapshotSha256: sha256Json(policySnapshot), updatedAt: now };
+  return { ...action, status: "executing", approvedBy: actorIdentity(principal), approvedPrincipalId: principalIdentity(principal), approvedAt: now, policySnapshot, policySnapshotSha256: sha256Json(policySnapshot), updatedAt: now };
 }
 
 async function emitResponseAction(action) {
@@ -4055,10 +4245,11 @@ async function assertResponsePolicyAllows(action, tenantId) {
   return policy;
 }
 
-async function assertResponseActionReferences(action, tenantId) {
-  if (!action.caseId) return;
-  const caseRecord = await getTenantObject("CASE", action.caseId, tenantId, CASES_FILE);
+async function assertResponseActionReferences(action, principal) {
+  if (!action.caseId) return assertRequestedSourceIds(action.sourceIds || [], principal);
+  const caseRecord = await getAuthorizedTenantObject("CASE", action.caseId, principal, CASES_FILE);
   if (!caseRecord) throw publicError("Linked response case was not found", 409);
+  return caseRecord.sourceIds || [];
 }
 
 function validateResponseTarget(type, target) {
@@ -4139,6 +4330,7 @@ function canonicalJson(value) {
 }
 
 async function governedExportPayload(kind, body = {}, principal = {}) {
+  if (isSourceRestrictedPrincipal(principal)) body.sourceIds = await assertRequestedSourceIds(body.sourceIds || [], principal);
   const settings = (await getTenantObject("ENTERPRISE_SETTING", "default", principal.tenantId, ENTERPRISE_SETTINGS_FILE)) || defaultEnterpriseSettings(principal);
   if (settings.governance?.exportApprovalRequired === false) return { payload: body, approvalId: "" };
   if (body.approvalId) {
@@ -4151,22 +4343,35 @@ async function governedExportPayload(kind, body = {}, principal = {}) {
 
 async function createExportApproval(kind, payload, principal) {
   const now = Date.now();
+  const serializedPayload = JSON.stringify(payload ?? null);
+  const payloadBytes = Buffer.byteLength(serializedPayload, "utf8");
+  if (payloadBytes > MAX_EXPORT_APPROVAL_BYTES) throw publicError(`Export approval payload exceeds ${MAX_EXPORT_APPROVAL_BYTES} bytes`, 413);
   const existing = await listTenantObjects("EXPORT_APPROVAL", principal.tenantId, EXPORT_APPROVALS_FILE, MAX_PENDING_EXPORT_APPROVALS + 1);
   const pendingCount = existing.filter((item) => item.status === "pending" && Date.parse(item.requestExpiresAt || 0) > now).length;
   if (pendingCount >= MAX_PENDING_EXPORT_APPROVALS) {
     throw publicError(`Tenant has reached the ${MAX_PENDING_EXPORT_APPROVALS} pending export approval limit`, 429);
   }
+  const approvalId = randomUUID();
+  const payloadHash = sha256Json(payload);
+  const payloadStorage = await persistExportApprovalPayload(approvalId, principal.tenantId, serializedPayload, payloadHash);
   const approval = {
-    id: randomUUID(),
+    id: approvalId,
     tenantId: principal.tenantId,
     kind,
+    purpose: String(payload?.reportType || kind).slice(0, 80),
+    format: String(payload?.format || (kind === "security-lake" ? "ocsf" : "json")).slice(0, 20),
+    label: payload?.reportType === "executive-brief" ? "Executive security brief" : kind === "security-lake" ? "Security Lake export" : "Investigation package",
     status: "pending",
-    payload,
-    payloadHash: sha256Json(payload),
+    ...(payloadStorage ? { payloadStorage } : { payload }),
+    payloadBytes,
+    payloadHash,
+    contentSha256: normalizeSha256(payload?.contentSha256),
     requestedBy: actorIdentity(principal),
     requestedSubject: principal.subject || "",
+    requestedPrincipalId: principalIdentity(principal),
     requestedAt: new Date(now).toISOString(),
     requestExpiresAt: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    ttl: Math.ceil((now + 24 * 60 * 60 * 1000) / 1000),
     createdAt: new Date(now).toISOString(),
     updatedAt: new Date(now).toISOString()
   };
@@ -4202,7 +4407,7 @@ function assertExportApprovalPending(approval, principal) {
   if (!approval) throw publicError("Export approval request not found", 404);
   if (approval.status !== "pending") throw publicError("Export approval request is not pending", 409);
   if (Date.now() >= Date.parse(approval.requestExpiresAt || 0)) throw publicError("Export approval request expired", 409);
-  if (REQUIRE_SEPARATE_APPROVER && sameActor(approval.requestedBy, principal)) throw publicError("The requester cannot approve their own export", 403);
+  if (REQUIRE_SEPARATE_APPROVER && sameActor(approval.requestedBy, principal, approval.requestedPrincipalId || approval.requestedSubject)) throw publicError("The requester cannot approve their own export", 403);
 }
 
 function buildApprovedExport(approval, principal) {
@@ -4211,6 +4416,7 @@ function buildApprovedExport(approval, principal) {
     ...approval,
     status: "approved",
     approvedBy: actorIdentity(principal),
+    approvedPrincipalId: principalIdentity(principal),
     approvedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + EXPORT_APPROVAL_TTL_SECONDS * 1000).toISOString(),
     updatedAt: new Date(now).toISOString()
@@ -4222,17 +4428,19 @@ async function consumeExportApproval(id, kind, principal, contentSha256 = "") {
   if (!approval) throw publicError("Export approval request not found", 404);
   if (approval.kind !== kind || approval.status !== "approved") throw publicError("Export approval is not valid for this operation", 409);
   if (Date.now() >= Date.parse(approval.expiresAt || 0)) throw publicError("Export approval expired", 409);
+  const approvedPayload = await loadExportApprovalPayload(approval);
   if (kind === "security-lake") {
-    const expectedHash = normalizeSha256(approval.payload?.contentSha256);
+    const expectedHash = normalizeSha256(approval.contentSha256 || approvedPayload?.contentSha256);
     const suppliedHash = normalizeSha256(contentSha256);
     if (!expectedHash || !suppliedHash || expectedHash !== suppliedHash) {
       throw publicError("The current Security Lake evidence does not match the approved content hash", 409);
     }
   }
-  if (!isAdminPrincipal(principal) && approval.requestedSubject !== principal.subject && approval.requestedBy !== principal.email) {
+  if (!isAdminPrincipal(principal) && (approval.requestedPrincipalId ? approval.requestedPrincipalId !== principalIdentity(principal) : approval.requestedSubject !== principal.subject)) {
     throw publicError("Export approval belongs to another requester", 403);
   }
-  const consumed = { ...approval, status: "consumed", consumedBy: actorIdentity(principal), consumedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  const { payload: _discardedPayload, ...approvalMetadata } = approval;
+  const consumed = { ...approvalMetadata, status: "consumed", consumedBy: actorIdentity(principal), consumedPrincipalId: principalIdentity(principal), consumedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ttl: Math.ceil((Date.now() + EXPORT_APPROVAL_TTL_SECONDS * 1000) / 1000) };
   if (STORE_MODE === "dynamodb") await ddbConsumeApproval(consumed);
   else {
     const lockKey = `approval:${sanitizeTenantId(principal.tenantId)}:${id}`;
@@ -4246,19 +4454,65 @@ async function consumeExportApproval(id, kind, principal, contentSha256 = "") {
       activeLocalLeases.delete(lockKey);
     }
   }
-  return approval;
+  await deleteExportApprovalPayload(approval).catch((error) => logError("export_payload_delete_failed", { approvalId: approval.id, tenantId: approval.tenantId, error: error.message }));
+  return { ...approval, payload: approvedPayload };
+}
+
+async function persistExportApprovalPayload(id, tenantId, serializedPayload, payloadHash) {
+  if (!EXPORT_PAYLOAD_BUCKET) return null;
+  const key = `${EXPORT_PAYLOAD_PREFIX.replace(/^\/+|\/+$/g, "")}/${sanitizeTenantId(tenantId)}/${id}.json`;
+  await awsRequest({
+    service: "s3",
+    region: EXPORT_PAYLOAD_REGION,
+    method: "PUT",
+    host: s3Host(EXPORT_PAYLOAD_REGION),
+    path: s3Path(EXPORT_PAYLOAD_BUCKET, key),
+    headers: { "content-type": "application/json", "x-amz-meta-signalprism-sha256": payloadHash },
+    body: serializedPayload
+  });
+  return { bucket: EXPORT_PAYLOAD_BUCKET, key, region: EXPORT_PAYLOAD_REGION };
+}
+
+async function loadExportApprovalPayload(approval) {
+  if (!approval.payloadStorage) return approval.payload;
+  const storage = approval.payloadStorage;
+  if (storage.bucket !== EXPORT_PAYLOAD_BUCKET || !String(storage.key || "").startsWith(`${EXPORT_PAYLOAD_PREFIX.replace(/^\/+|\/+$/g, "")}/${sanitizeTenantId(approval.tenantId)}/`)) {
+    throw publicError("Export approval payload reference is invalid", 409);
+  }
+  const response = await awsRequest({ service: "s3", region: storage.region || EXPORT_PAYLOAD_REGION, method: "GET", host: s3Host(storage.region || EXPORT_PAYLOAD_REGION), path: s3Path(storage.bucket, storage.key) });
+  if (Buffer.byteLength(response.body || "", "utf8") > MAX_EXPORT_APPROVAL_BYTES) throw publicError("Export approval payload is too large", 409);
+  const payload = JSON.parse(response.body || "null");
+  if (!constantTimeEqual(sha256Json(payload), approval.payloadHash)) throw publicError("Export approval payload integrity check failed", 409);
+  return payload;
+}
+
+async function deleteExportApprovalPayload(approval) {
+  if (!approval.payloadStorage) return;
+  const storage = approval.payloadStorage;
+  await awsRequest({ service: "s3", region: storage.region || EXPORT_PAYLOAD_REGION, method: "DELETE", host: s3Host(storage.region || EXPORT_PAYLOAD_REGION), path: s3Path(storage.bucket, storage.key) });
 }
 
 function publicExportApproval(approval) {
   const { payload, ...metadata } = approval;
-  return { ...metadata, contentSha256: normalizeSha256(payload?.contentSha256) };
+  return { ...metadata, contentSha256: normalizeSha256(approval.contentSha256 || payload?.contentSha256) };
 }
 
 function actorIdentity(principal = {}) {
   return principal.email || principal.name || principal.subject || "unknown";
 }
 
-function sameActor(actor, principal = {}) {
+function principalIdentity(principal = {}) {
+  const issuer = normalizeIssuer(principal.issuer || (principal.authType === "oidc" ? OIDC_ISSUER : "")) || String(principal.authType || "unknown");
+  const subject = String(principal.subject || "").trim();
+  return subject ? `${issuer}#${subject}` : "";
+}
+
+function sameActor(actor, principal = {}, stableIdentity = "") {
+  if (stableIdentity) {
+    const current = principalIdentity(principal);
+    if (String(stableIdentity).includes("#")) return Boolean(current) && constantTimeEqual(String(stableIdentity), current);
+    return Boolean(principal.subject) && constantTimeEqual(String(stableIdentity), String(principal.subject));
+  }
   const expected = String(actor || "").toLowerCase();
   return [principal.email, principal.name, principal.subject].filter(Boolean).some((value) => String(value).toLowerCase() === expected);
 }
@@ -4299,6 +4553,8 @@ function normalizeDetectionRule(body = {}, principal = {}, existing = null) {
     status: existing?.status === "production" ? "production" : requestedStatus,
     owner: String(existing?.owner || actorIdentity(principal)),
     createdBy: String(existing?.createdBy || actorIdentity(principal)),
+    ownerPrincipalId: existing?.ownerPrincipalId || principalIdentity(principal),
+    createdPrincipalId: existing?.createdPrincipalId || principalIdentity(principal),
     version: Math.max(1, Number(existing?.version || 1)),
     approvedBy: existing?.status === "production" ? String(existing.approvedBy || "") : "",
     approvedAt: existing?.status === "production" ? String(existing.approvedAt || "") : "",
@@ -4332,7 +4588,7 @@ async function approveDetectionRule(id, requestedStatus, principal) {
       throw publicError("Rule must have a recent passing backtest for this exact version before production approval", 409);
     }
     if (!rule.attackId || String(rule.description || "").length < 30) throw publicError("Production rules require ATT&CK mapping and a substantive description", 409);
-    if (REQUIRE_SEPARATE_APPROVER && (sameActor(rule.createdBy, principal) || sameActor(rule.owner, principal))) {
+    if (REQUIRE_SEPARATE_APPROVER && (sameActor(rule.createdBy, principal, rule.createdPrincipalId) || sameActor(rule.owner, principal, rule.ownerPrincipalId))) {
       throw publicError("Rule author cannot approve their own production rule", 403);
     }
   }
@@ -4392,10 +4648,12 @@ function normalizeSecurityLakeExport(body = {}, principal = {}) {
   };
 }
 
-function normalizeEnterpriseArtifact(body = {}, principal = {}) {
+function normalizeEnterpriseArtifact(body = {}, principal = {}, existing = null) {
   const now = new Date().toISOString();
   const type = String(body.type || "").trim().toUpperCase().replace(/[^A-Z0-9_:-]/g, "_").slice(0, 80);
   if (!type) throw new Error("Artifact type is required");
+  if (existing && existing.type !== type) throw publicError("Artifact type is immutable", 409);
+  if (existing && Number(body.revision) !== Number(existing.revision || 1)) throw publicError("Artifact changed concurrently; refresh and retry", 409);
   const title = String(body.title || type.toLowerCase().replace(/[_:-]+/g, " ")).trim().slice(0, 180);
   const allowedPayload = body.payload && typeof body.payload === "object" ? body.payload : {};
   return {
@@ -4405,10 +4663,70 @@ function normalizeEnterpriseArtifact(body = {}, principal = {}) {
     title,
     status: String(body.status || "active").trim().slice(0, 40),
     payload: JSON.parse(JSON.stringify(allowedPayload)),
-    createdBy: actorIdentity(principal),
-    createdAt: now,
+    sourceIds: Array.isArray(body.sourceIds) ? [...new Set(body.sourceIds.map(String))].slice(0, 100) : (existing?.sourceIds || []),
+    revision: Number(existing?.revision || 0) + 1,
+    createdBy: existing?.createdBy || actorIdentity(principal),
+    createdPrincipalId: existing?.createdPrincipalId || principalIdentity(principal),
+    createdAt: existing?.createdAt || now,
     updatedAt: now
   };
+}
+
+async function governEnterpriseArtifact(artifact, principal) {
+  if (artifact.type === "REPORT_SCHEDULE") {
+    if (!isAdminPrincipal(principal)) throw publicError("Admin role is required to manage report schedules", 403);
+    const users = await listTenantObjects("TENANT_USER", principal.tenantId, TENANT_USERS_FILE, 500);
+    let schedule;
+    try {
+      schedule = validateReportSchedule({ ...artifact.payload, id: artifact.id }, users);
+    } catch (error) {
+      throw publicError(error.message || "Report schedule is invalid", 400);
+    }
+    return { ...artifact, title: schedule.name, status: schedule.status, payload: schedule };
+  }
+  if (artifact.type === "REPORT_DELIVERY") {
+    if (!isAdminPrincipal(principal)) throw publicError("Admin role is required to create report deliveries", 403);
+    const scheduleId = String(artifact.payload?.scheduleId || "");
+    const scheduleArtifact = await getTenantObject("ENTERPRISE_ARTIFACT", scheduleId, principal.tenantId, ENTERPRISE_ARTIFACTS_FILE);
+    if (!scheduleArtifact || scheduleArtifact.type !== "REPORT_SCHEDULE") throw publicError("The report schedule does not exist in this tenant", 404);
+    if (!artifact.payload?.report || typeof artifact.payload.report !== "object") throw publicError("Report delivery payload is required", 400);
+    const reportTenantId = String(artifact.payload.report.tenantId || principal.tenantId);
+    if (reportTenantId !== principal.tenantId) throw publicError("Report tenant does not match the authenticated tenant", 403);
+    const expectedRecipients = [...new Set((scheduleArtifact.payload?.recipients || []).map((value) => String(value).toLowerCase()))].sort();
+    const suppliedRecipients = [...new Set((artifact.payload.recipients || []).map((value) => String(value).toLowerCase()))].sort();
+    if (JSON.stringify(expectedRecipients) !== JSON.stringify(suppliedRecipients)) throw publicError("Delivery recipients do not match the governed schedule", 409);
+    return {
+      ...artifact,
+      status: "delivered",
+      payload: {
+        ...artifact.payload,
+        report: { ...artifact.payload.report, tenantId: principal.tenantId },
+        recipients: expectedRecipients,
+        destination: "tenant-inbox"
+      }
+    };
+  }
+  if (artifact.type === "EXECUTIVE_BRIEF") {
+    const reportTenantId = String(artifact.payload?.tenantId || principal.tenantId);
+    if (reportTenantId !== principal.tenantId) throw publicError("Report tenant does not match the authenticated tenant", 403);
+    const classification = String(artifact.payload?.classification || "Confidential");
+    if (!["Public", "Internal", "Confidential", "Restricted"].includes(classification)) throw publicError("Report classification is invalid", 400);
+    return { ...artifact, payload: { ...artifact.payload, tenantId: principal.tenantId, classification } };
+  }
+  return artifact;
+}
+
+function enterpriseArtifactVisibleTo(artifact, principal) {
+  if (isAdminPrincipal(principal)) return true;
+  if (artifact.type === "REPORT_SCHEDULE") return false;
+  if (artifact.type === "REPORT_DELIVERY") {
+    const email = String(principal.email || "").toLowerCase();
+    return Boolean(email) && (artifact.payload?.recipients || []).some((recipient) => String(recipient).toLowerCase() === email);
+  }
+  if (artifact.type === "EXECUTIVE_BRIEF" && artifact.payload?.classification === "Restricted") {
+    return principal.roles?.includes("analyst") || principal.roles?.includes("admin");
+  }
+  return true;
 }
 
 function attestEnterpriseArtifact(artifact) {
@@ -4437,6 +4755,8 @@ function normalizeTenantUser(body = {}, principal = {}) {
     name,
     email,
     externalId: String(body.externalId || body.id || email).trim().slice(0, 256),
+    subject: String(body.subject || body.externalId || body.id || email).trim().slice(0, 512),
+    issuer: body.issuer ? normalizeIssuer(String(body.issuer).trim()) : "",
     role,
     roleIds: Array.isArray(body.roleIds) ? [...new Set(body.roleIds.map(String).filter((id) => /^[a-zA-Z0-9._-]{2,80}$/.test(id)))].slice(0, 20) : [],
     attributes: normalizeIdentityAttributes(body.attributes),
@@ -4739,6 +5059,8 @@ async function normalizeCase(body = {}, principal = {}) {
     severity: ["critical", "high", "medium", "low", "informational"].includes(body.severity) ? body.severity : "medium",
     notes,
     linkedDetection: String(body.linkedDetection || ""),
+    sourceIds: Array.isArray(body.sourceIds) ? [...new Set(body.sourceIds.map(String))].slice(0, 100) : (existing?.sourceIds || []),
+    createdPrincipalId: existing?.createdPrincipalId || principalIdentity(principal),
     createdAt: existing?.createdAt || body.createdAt || now,
     updatedAt: now,
     revision: Number(existing?.revision || 0) + 1,
@@ -4759,15 +5081,15 @@ async function normalizeCase(body = {}, principal = {}) {
 
 async function loadAdvancedOperations(principal, options = {}) {
   const [events, correlations, behaviorFindings, campaigns, sources, cases, tasks, sensors, previousRuns, pipelinePolicies, exposureContexts, regionalCells, providerWorkspaces, notificationPolicies] = await Promise.all([
-    listTenantObjects("TELEMETRY_EVENT", principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000),
-    listTenantObjects("CORRELATION", principal.tenantId, CORRELATIONS_FILE, 2000),
-    listTenantObjects("BEHAVIOR_FINDING", principal.tenantId, BEHAVIOR_FINDINGS_FILE, 2000),
-    listTenantObjects("CAMPAIGN", principal.tenantId, CAMPAIGNS_FILE, 500),
-    listTenantObjects("SOURCE", principal.tenantId, SOURCES_FILE, 500),
-    listTenantObjects("CASE", principal.tenantId, CASES_FILE, 1000),
-    listTenantObjects("CASE_TASK", principal.tenantId, CASE_TASKS_FILE, 1000),
-    listTenantObjects("SENSOR", principal.tenantId, SENSORS_FILE, 500),
-    listTenantObjects("ADVANCED_ANALYTICS", principal.tenantId, ADVANCED_ANALYTICS_FILE, 3),
+    listAuthorizedTenantObjects("TELEMETRY_EVENT", principal, TELEMETRY_EVENTS_FILE, 20_000),
+    listAuthorizedTenantObjects("CORRELATION", principal, CORRELATIONS_FILE, 2000),
+    listAuthorizedTenantObjects("BEHAVIOR_FINDING", principal, BEHAVIOR_FINDINGS_FILE, 2000),
+    listAuthorizedTenantObjects("CAMPAIGN", principal, CAMPAIGNS_FILE, 500),
+    listTenantObjects("SOURCE", principal.tenantId, SOURCES_FILE, 500).then((items) => filterSourcesForPrincipal(items, principal)),
+    listAuthorizedTenantObjects("CASE", principal, CASES_FILE, 1000),
+    listAuthorizedTenantObjects("CASE_TASK", principal, CASE_TASKS_FILE, 1000),
+    listAuthorizedTenantObjects("SENSOR", principal, SENSORS_FILE, 500),
+    listAuthorizedTenantObjects("ADVANCED_ANALYTICS", principal, ADVANCED_ANALYTICS_FILE, 3),
     listTenantObjects("PIPELINE_POLICY", principal.tenantId, PIPELINE_POLICIES_FILE, 10),
     listTenantObjects("EXPOSURE_CONTEXT", principal.tenantId, EXPOSURE_CONTEXTS_FILE, 10),
     listTenantObjects("REGIONAL_CELL", principal.tenantId, REGIONAL_CELLS_FILE, 100),
@@ -4786,6 +5108,7 @@ async function loadAdvancedOperations(principal, options = {}) {
   }, { ...options, pipelinePolicy: pipelinePolicies[0]?.payload || pipelinePolicies[0] || {}, exposureContext: exposureContexts[0]?.payload || exposureContexts[0] || {} });
   return {
     ...snapshot,
+    sourceIds: sources.map((source) => source.id),
     inputCounts: { events: events.length, findings: correlations.length + behaviorFindings.length, campaigns: campaigns.length, sources: sources.length, sensors: sensors.length, cases: cases.length, tasks: tasks.length },
     deployment: {
       streamMode: CONTINUOUS_STREAM_MODE,
@@ -4864,11 +5187,13 @@ async function storeTelemetryEvents(events, principal, channel = "api") {
     const id = String(event.id || `event-${sha256Json(event).slice(0, 24)}`);
     if (!existingIds.has(id)) unique.set(id, { ...event, id });
   }
+  await reserveTelemetryUsage(principal, unique.size);
   const stored = [];
+  const ttl = Math.floor(Date.now() / 1000) + TELEMETRY_RETENTION_DAYS * 86400;
   for (const event of unique.values()) {
     const masked = Object.fromEntries(Object.entries(event).map(([key, value]) => [key, maskFields.has(key) && value ? "[MASKED BY PIPELINE POLICY]" : value]));
     const hot = ["critical", "high"].includes(String(event.severity || "").toLowerCase()) || event.findingType || event.signature;
-    const record = { ...masked, tenantId: principal.tenantId, ingestChannel: channel, pipelineTier: hot ? "hot" : event.raw ? "cold" : "warm", pipelinePolicyId: policies[0]?.id || "default", ingestedAt: now, createdAt: event.timestamp, updatedAt: now, ingestedBy: actorIdentity(principal) };
+    const record = { ...masked, tenantId: principal.tenantId, ingestChannel: channel, pipelineTier: hot ? "hot" : event.raw ? "cold" : "warm", pipelinePolicyId: policies[0]?.id || "default", ingestedAt: now, createdAt: event.timestamp, updatedAt: now, ingestedBy: actorIdentity(principal), ingestedPrincipalId: principalIdentity(principal), ttl };
     stored.push(record);
   }
   await putTenantObjectsBatch("TELEMETRY_EVENT", stored, principal.tenantId, TELEMETRY_EVENTS_FILE);
@@ -4878,6 +5203,8 @@ async function storeTelemetryEvents(events, principal, channel = "api") {
 
 async function runInteractiveSearch(localEvents, query, limit, principal) {
   if (HOT_SEARCH_MODE === "local") return runRetrospectiveHunt(localEvents, query, { limit });
+  const allowedSourceIds = await allowedSourceIdsForPrincipal(principal);
+  if (allowedSourceIds && !allowedSourceIds.size) return runRetrospectiveHunt([], query, { limit });
   assertOutboundAllowed("managed hunt search");
   if (HOT_SEARCH_MODE === "clickhouse") throw publicError("ClickHouse hunt mode requires the separately deployed SignalPrism query bridge", 503);
   if (!HOT_SEARCH_ENDPOINT) throw publicError("OpenSearch hunt mode requires NDR_HOT_SEARCH_ENDPOINT", 503);
@@ -4893,7 +5220,7 @@ async function runInteractiveSearch(localEvents, query, limit, principal) {
     host: endpoint.host,
     path: `${basePath}/signalprism-${encodeURIComponent(sanitizeTenantId(principal.tenantId))}-*/_search`,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ size: limit, timeout: "3s", terminate_after: 100_000, track_total_hits: 100_000, _source: ["id", "timestamp", "provider", "format", "category", "sourceIp", "sourcePort", "destinationIp", "destinationPort", "protocol", "action", "outcome", "severity", "application", "identity", "resource", "bytes", "packets", "sourceId"], sort: [{ timestamp: { order: "desc", unmapped_type: "date" } }], query: { bool: { filter: [{ term: { "tenantId.keyword": principal.tenantId } }, ...compiled.filter], must: compiled.must } } })
+    body: JSON.stringify({ size: limit, timeout: "3s", terminate_after: 100_000, track_total_hits: 100_000, _source: ["id", "timestamp", "provider", "format", "category", "sourceIp", "sourcePort", "destinationIp", "destinationPort", "protocol", "action", "outcome", "severity", "application", "identity", "resource", "bytes", "packets", "sourceId"], sort: [{ timestamp: { order: "desc", unmapped_type: "date" } }], query: { bool: { filter: [{ term: { "tenantId.keyword": principal.tenantId } }, ...(allowedSourceIds ? [{ terms: { "sourceId.keyword": [...allowedSourceIds] } }] : []), ...compiled.filter], must: compiled.must } } })
   });
   const payload = JSON.parse(response.body || "{}");
   const hits = payload.hits?.hits || [];
@@ -5028,10 +5355,12 @@ async function ensureStreamDelivery(events, principal, profile = "native-current
     eventIds,
     pendingEventIds: eventIds,
     deliveredEventIds: [],
+    sourceIds: [...new Set((events || []).map((event) => event.sourceId).filter(Boolean))],
     attempts: 0,
     maxAttempts: STREAM_DELIVERY_MAX_ATTEMPTS,
     nextAttemptAt: now,
     requestedBy: actorIdentity(principal),
+    requestedPrincipalId: principalIdentity(principal),
     createdAt: now,
     updatedAt: now
   };
@@ -5225,7 +5554,7 @@ async function createSecurityLakeCustomSource(definition, { providerAccountId, e
 async function createPacketAccessUrl(manifestId, grantId, principal) {
   if (!grantId) throw new Error("Packet access grant ID is required");
   const [manifest, grant] = await Promise.all([
-    getTenantObject("PACKET_MANIFEST", manifestId, principal.tenantId, PACKET_MANIFESTS_FILE),
+    getAuthorizedTenantObject("PACKET_MANIFEST", manifestId, principal, PACKET_MANIFESTS_FILE),
     getTenantObject("PACKET_ACCESS_GRANT", grantId, principal.tenantId, PACKET_ACCESS_GRANTS_FILE)
   ]);
   if (!manifest || !grant || grant.manifestId !== manifestId) throw publicError("Packet access grant was not found", 404);
@@ -5307,6 +5636,7 @@ async function createEvidenceUpload(body, principal) {
   if (!Number.isInteger(contentLength) || contentLength < 1 || contentLength > MAX_EVIDENCE_UPLOAD_BYTES) throw new Error(`Evidence upload size must be between 1 byte and ${MAX_EVIDENCE_UPLOAD_BYTES} bytes`);
   const sha256 = normalizeSha256(body.sha256);
   if (!sha256) throw new Error("Evidence SHA-256 is required");
+  const sourceIds = await assertRequestedSourceIds(body.sourceIds || (body.sourceId ? [body.sourceId] : []), principal);
   const uploads = await listTenantObjects("EVIDENCE_UPLOAD", principal.tenantId, EVIDENCE_UPLOADS_FILE, 1000);
   const active = uploads.filter((upload) => ["pending", "quarantined", "scanning"].includes(upload.status) && Date.now() < Date.parse(upload.expiresAt || Date.now() + 1));
   if (active.length >= MAX_ACTIVE_EVIDENCE_UPLOADS) throw publicError(`Tenant active evidence upload quota of ${MAX_ACTIVE_EVIDENCE_UPLOADS} reached`, 429);
@@ -5350,6 +5680,8 @@ async function createEvidenceUpload(body, principal) {
     contentType,
     contentLength,
     sha256,
+    sourceId: sourceIds[0] || "",
+    sourceIds,
     bucket: stagingBucket,
     key,
     uri: `s3://${stagingBucket}/${key}`,
@@ -5364,7 +5696,8 @@ async function createEvidenceUpload(body, principal) {
     expiresAt: presigned.expiresAt,
     createdAt: now,
     updatedAt: now,
-    createdBy: actorIdentity(principal)
+    createdBy: actorIdentity(principal),
+    createdPrincipalId: principalIdentity(principal)
   };
   await putTenantObject("EVIDENCE_UPLOAD", id, upload, principal.tenantId, EVIDENCE_UPLOADS_FILE);
   await appendAudit("evidence.upload.created", { uploadId: id, fileName, contentLength, sha256, retentionUntil, tenantId: principal.tenantId }, principal);
@@ -5372,7 +5705,7 @@ async function createEvidenceUpload(body, principal) {
 }
 
 async function completeEvidenceUpload(id, body, principal) {
-  const upload = await getTenantObject("EVIDENCE_UPLOAD", id, principal.tenantId, EVIDENCE_UPLOADS_FILE);
+  const upload = await getAuthorizedTenantObject("EVIDENCE_UPLOAD", id, principal, EVIDENCE_UPLOADS_FILE);
   if (!upload) throw publicError("Evidence upload not found", 404);
   if (upload.status !== "pending") throw publicError("Evidence upload is already complete or expired", 409);
   if (Date.now() >= Date.parse(upload.expiresAt || 0)) throw publicError("Evidence upload session expired", 409);
@@ -5395,10 +5728,10 @@ async function completeEvidenceUpload(id, body, principal) {
 }
 
 async function attestEvidenceScan(id, body, principal) {
-  const upload = await getTenantObject("EVIDENCE_UPLOAD", id, principal.tenantId, EVIDENCE_UPLOADS_FILE);
+  const upload = await getAuthorizedTenantObject("EVIDENCE_UPLOAD", id, principal, EVIDENCE_UPLOADS_FILE);
   if (!upload) throw publicError("Evidence upload not found", 404);
   if (upload.status !== "quarantined") throw publicError("Evidence upload is not awaiting a scan attestation", 409);
-  if (REQUIRE_SEPARATE_APPROVER && sameActor(upload.createdBy, principal)) throw publicError("The evidence uploader cannot attest the malware scan", 403);
+  if (REQUIRE_SEPARATE_APPROVER && sameActor(upload.createdBy, principal, upload.createdPrincipalId)) throw publicError("The evidence uploader cannot attest the malware scan", 403);
   assertEvidenceScannerPrincipal(principal);
   const outcome = String(body.outcome || "").toLowerCase();
   if (!["clean", "infected", "error"].includes(outcome)) throw new Error("Evidence scan outcome must be clean, infected, or error");
@@ -5533,10 +5866,10 @@ async function runAiInvestigation(body, principal) {
   if (objective.length < 5 || objective.length > 1000) throw new Error("Investigation objective must contain 5 to 1,000 characters");
   await reserveAiUsage(principal, { agentRuns: 1 });
   const [events, correlations, behaviorFindings, campaigns] = await Promise.all([
-    listTenantObjects("TELEMETRY_EVENT", principal.tenantId, TELEMETRY_EVENTS_FILE, 20_000),
-    listTenantObjects("CORRELATION", principal.tenantId, CORRELATIONS_FILE, 1000),
-    listTenantObjects("BEHAVIOR_FINDING", principal.tenantId, BEHAVIOR_FINDINGS_FILE, 1000),
-    listTenantObjects("CAMPAIGN", principal.tenantId, CAMPAIGNS_FILE, 500)
+    listAuthorizedTenantObjects("TELEMETRY_EVENT", principal, TELEMETRY_EVENTS_FILE, 20_000),
+    listAuthorizedTenantObjects("CORRELATION", principal, CORRELATIONS_FILE, 1000),
+    listAuthorizedTenantObjects("BEHAVIOR_FINDING", principal, BEHAVIOR_FINDINGS_FILE, 1000),
+    listAuthorizedTenantObjects("CAMPAIGN", principal, CAMPAIGNS_FILE, 500)
   ]);
   const hunt = body.huntQuery ? runRetrospectiveHunt(events, body.huntQuery, { limit: 250 }) : null;
   const signals = [...correlations, ...behaviorFindings].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
@@ -5576,10 +5909,12 @@ async function runAiInvestigation(body, principal) {
     signalIds: signals.slice(0, 20).map((signal) => signal.id),
     campaignIds: campaigns.slice(0, 10).map((campaign) => campaign.id),
     evidenceIds: selectedEvidenceIds,
+    sourceIds: [...new Set(events.map((event) => event.sourceId).filter(Boolean))],
     citations,
     hunt: hunt ? { id: hunt.id, query: hunt.normalizedQuery, scanned: hunt.scanned, matchCount: hunt.matchCount } : null,
     feedback: null,
     requestedBy: actorIdentity(principal),
+    requestedPrincipalId: principalIdentity(principal),
     createdAt: now,
     updatedAt: now,
     completedAt: now
@@ -5591,7 +5926,7 @@ async function runAiInvestigation(body, principal) {
 }
 
 async function saveAiInvestigationFeedback(id, body, principal) {
-  const run = await getTenantObject("AI_AGENT_RUN", id, principal.tenantId, AI_AGENT_RUNS_FILE);
+  const run = await getAuthorizedTenantObject("AI_AGENT_RUN", id, principal, AI_AGENT_RUNS_FILE);
   if (!run) throw publicError("AI investigation run not found", 404);
   const rating = ["helpful", "not-helpful"].includes(body.rating) ? body.rating : "";
   if (!rating) throw new Error("Feedback rating must be helpful or not-helpful");
@@ -5625,7 +5960,7 @@ async function upsertEventBridgeSchedule(job) {
     Target: {
       Arn: QUEUE_ARN,
       RoleArn: SCHEDULER_ROLE_ARN,
-      Input: JSON.stringify({ version: 1, type: "scheduled-ingest", tenantId: job.tenantId, job: { id: job.id, tenantId: job.tenantId, sourceId: job.sourceId || "", name: job.name, type: job.type, config: job.config }, principal: workerPrincipal({ subject: "scheduler", name: "EventBridge Scheduler", roles: ["admin"] }, job.tenantId) })
+      Input: JSON.stringify({ version: 2, type: "scheduled-ingest", tenantId: job.tenantId, jobId: job.id })
     }
   };
   const request = { service: "scheduler", region, host: `scheduler.${region}.amazonaws.com`, path: `/schedules/${encodeURIComponent(name)}`, headers: { "content-type": "application/json" }, body: JSON.stringify(payload) };
@@ -6309,12 +6644,12 @@ function xmlValue(xml, tag) {
   return match ? decodeXml(match[1]) : "";
 }
 
-function gunzipText(buffer) {
-  const output = gunzipSync(buffer, { maxOutputLength: MAX_INGEST_TEXT_BYTES });
+async function gunzipText(buffer) {
+  const output = await gunzipAsync(buffer, { maxOutputLength: MAX_INGEST_TEXT_BYTES });
   if (output.length > MAX_INGEST_TEXT_BYTES) {
     throw publicError(`Decompressed ingest object exceeds ${MAX_INGEST_TEXT_BYTES} bytes`, 413);
   }
-  return Promise.resolve(output.toString("utf8"));
+  return output.toString("utf8");
 }
 
 function encodePath(key) {
@@ -6684,13 +7019,21 @@ function logRequest(req, res, durationMs) {
     requestId: req.requestId,
     traceId: req.traceId,
     method: req.method,
-    path: req.url,
+    path: safeRequestPath(req),
     status: res.statusCode || 200,
     durationMs,
     remoteAddress: requestClientAddress(req),
     tenantId: req.principal?.tenantId,
     actorId: req.principal?.subject ? createHash("sha256").update(String(req.principal.subject)).digest("hex").slice(0, 16) : undefined
   });
+}
+
+function safeRequestPath(req) {
+  try {
+    return new URL(req.url, "http://localhost").pathname;
+  } catch {
+    return "/invalid-request-target";
+  }
 }
 
 function assignRequestContext(req, res) {

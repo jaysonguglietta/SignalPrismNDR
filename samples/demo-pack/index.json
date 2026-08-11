@@ -1,0 +1,46 @@
+{
+  "schema": "signalprism.demo-pack.v1",
+  "fixtureVersion": "2026.07.17",
+  "datasets": [
+    {
+      "title": "Enterprise clean baseline",
+      "file": "enterprise-clean-baseline-20000.log",
+      "manifest": "enterprise-clean-baseline-20000.manifest.json",
+      "physicalRecordLines": 20000,
+      "expectedParsedRecords": 20000,
+      "expectedParserIssues": 0,
+      "sizeBytes": 5042640,
+      "sha256": "a753d4a2f908ff43044dae86ae70208d2aaf35f7643d2cbd69d458bee141cb5c"
+    },
+    {
+      "title": "Ransomware intrusion chain",
+      "file": "ransomware-intrusion-chain-25000.log",
+      "manifest": "ransomware-intrusion-chain-25000.manifest.json",
+      "physicalRecordLines": 25000,
+      "expectedParsedRecords": 25000,
+      "expectedParserIssues": 0,
+      "sizeBytes": 6308833,
+      "sha256": "7aae53ddd083b906a2a404cbd762f2039b1d2d2dcd4f7b61b035f270574f57f1"
+    },
+    {
+      "title": "SOC shift mixed workload",
+      "file": "soc-shift-mixed-35000.log",
+      "manifest": "soc-shift-mixed-35000.manifest.json",
+      "physicalRecordLines": 35000,
+      "expectedParsedRecords": 34970,
+      "expectedParserIssues": 30,
+      "sizeBytes": 8786582,
+      "sha256": "0dcdb3010e8f10cf7d4e0320e487acbe82b3c3adffac670c84f0fd68ec9f6d0f"
+    },
+    {
+      "title": "Telemetry quality failures",
+      "file": "telemetry-quality-failures-12000.log",
+      "manifest": "telemetry-quality-failures-12000.manifest.json",
+      "physicalRecordLines": 12000,
+      "expectedParsedRecords": 11900,
+      "expectedParserIssues": 100,
+      "sizeBytes": 2953904,
+      "sha256": "cec45ec8935d86022e1b219306fd1da6039ae71e6f8c9aa94ba280499b71ba7b"
+    }
+  ]
+}

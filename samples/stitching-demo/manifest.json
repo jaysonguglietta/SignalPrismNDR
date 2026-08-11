@@ -1,0 +1,52 @@
+{
+  "schema": "signalprism.stitching-demo.v1",
+  "generatedAt": "2026-07-17T15:36:10.317Z",
+  "scenario": "Privilege escalation followed by database access, command and control, DNS tunneling, and exfiltration.",
+  "accountId": "123456789012",
+  "importantEntities": {
+    "localIp": "10.0.1.12",
+    "databaseIp": "10.0.2.28",
+    "commandIp": "198.51.100.44",
+    "identity": "arn:aws:iam::123456789012:user/compromised-admin"
+  },
+  "expectedStages": [
+    "Privilege Escalation",
+    "Lateral Movement",
+    "Command and Control",
+    "Exfiltration"
+  ],
+  "expectedFormats": [
+    "cloudtrail",
+    "aws-vpc-flow",
+    "suricata",
+    "route53-dns",
+    "guardduty"
+  ],
+  "files": [
+    {
+      "name": "01-cloudtrail-control-plane.json",
+      "bytes": 1554,
+      "sha256": "58ade204dfb2f5adf560aa168b59338764db3768be5777957b4280775ea27404"
+    },
+    {
+      "name": "02-vpc-network-flows.log",
+      "bytes": 12968,
+      "sha256": "f101cab71a72ec195f6c8bd3aa40b5b56b54b094667a3a6f7b4559266a7a1a45"
+    },
+    {
+      "name": "03-suricata-sensor.jsonl",
+      "bytes": 23936,
+      "sha256": "5658450f101536ba59fcb23cc99df91e56054c39794f19fb27fcf8fd4e34b296"
+    },
+    {
+      "name": "04-route53-dns.jsonl",
+      "bytes": 25255,
+      "sha256": "cf3d4ad9dfb83e09ca0cfd33359c6986f6900e6eb8e50f6205d67bf0b8e22891"
+    },
+    {
+      "name": "05-guardduty-findings.jsonl",
+      "bytes": 1082,
+      "sha256": "c4b2940c1df4531c65ffbb621c6c89c94d5bc4c457c233560248be7e89f0f75c"
+    }
+  ]
+}

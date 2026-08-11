@@ -143,14 +143,19 @@ const STORAGE_KEYS = {
   playbookRuns: "ndrFlowConsole.playbookRuns.v1",
   evidenceVault: "ndrFlowConsole.evidenceVault.v1",
   enterpriseReports: "ndrFlowConsole.enterpriseReports.v1",
+  executiveBriefs: "ndrFlowConsole.executiveBriefs.v1",
+  reportSchedules: "ndrFlowConsole.reportSchedules.v1",
+  reportDeliveries: "ndrFlowConsole.reportDeliveries.v1",
   enrichment: "ndrFlowConsole.enrichment.v1"
 };
 const PROTECTED_STORAGE_KEYS = new Set(Object.values(STORAGE_KEYS));
 let activeStorageScope = "signed-out";
 const MAX_BROWSER_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_BROWSER_TEXT_BYTES = 32 * 1024 * 1024;
+const MAX_BROWSER_BATCH_FILES = 20;
 const MAX_STRUCTURED_MESSAGES = 100000;
 const MAX_STRUCTURED_DEPTH = 16;
+const STITCHING_FLOW_FORMATS = new Set(["aws-vpc-flow", "azure-nsg", "gcp-vpc-flow"]);
 let pseudonymKeyCache = null;
 
 const SAMPLE_LOG = `#Fields: version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status
@@ -174,6 +179,23 @@ const state = {
   errors: [],
   fileName: "",
   rawEvidenceText: "",
+  evidenceSources: [],
+  stitching: { events: [], result: null, selectedChainId: "" },
+  heatmap: {
+    mode: "graph",
+    groupBy: "entity",
+    metric: "events",
+    scale: "log",
+    evidenceFilter: "all",
+    zoom: 1,
+    panRatio: 0,
+    panX: 0,
+    panY: 0,
+    selection: null,
+    model: null,
+    drag: null
+  },
+  executive: { topFindings: [], selectedFindingId: "", evidenceRecords: null, currentReport: null, renderToken: 0 },
   enrichment: {},
   activeWorkspaceId: "",
   selectedEntity: null,
@@ -183,7 +205,8 @@ const state = {
   enterprise: { telemetryEvents: [], correlations: [], responseActions: [], contentBundles: [], readiness: null, contentVerification: null },
   jobRunPoller: null,
   replayTimer: null,
-  pendingConfirm: null
+  pendingConfirm: null,
+  busy: false
 };
 
 const els = {};
@@ -191,6 +214,10 @@ let idbApi = null;
 let editingCaseRevision = 0;
 let backendApi = null;
 let topologyApi = null;
+let eventStitchingApi = null;
+let eventStitchingPromise = null;
+let networkHeatmapApi = null;
+let executiveReportingApi = null;
 let platformController = null;
 let operationsController = null;
 
@@ -210,6 +237,7 @@ function cacheElements() {
     "dropZone",
     "fileInput",
     "fileMeta",
+    "evidenceSourceList",
     "workspaceSelect",
     "workspaceNameInput",
     "newWorkspaceButton",
@@ -226,6 +254,7 @@ function cacheElements() {
     "searchInput",
     "actionFilter",
     "protocolFilter",
+    "evidenceSourceFilter",
     "parseIssueCount",
     "parseIssueList",
     "metricGrid",
@@ -233,6 +262,14 @@ function cacheElements() {
     "timeRangeLabel",
     "priorityEntities",
     "topPorts",
+    "topFindingsPeriod",
+    "topFindingsSource",
+    "topFindingsSeverity",
+    "topFindingsEnvironment",
+    "resetTopFindingsButton",
+    "topFindingsStatus",
+    "topFindingsTable",
+    "topFindingDetail",
     "findingCount",
     "findingList",
     "severityFilter",
@@ -325,6 +362,27 @@ function cacheElements() {
     "maskIps",
     "maskAccounts",
     "maskDomains",
+    "executivePeriodSelect",
+    "executiveClassificationSelect",
+    "executiveNarrativeSelect",
+    "executiveOrganizationInput",
+    "generateExecutiveBriefButton",
+    "exportExecutivePdfButton",
+    "exportExecutiveCsvButton",
+    "exportExecutiveJsonButton",
+    "executiveBriefStatus",
+    "executiveBriefOutput",
+    "reportScheduleAccessLabel",
+    "reportScheduleForm",
+    "reportScheduleNameInput",
+    "reportScheduleFrequencySelect",
+    "reportSchedulePeriodSelect",
+    "reportScheduleFormatSelect",
+    "reportScheduleClassificationSelect",
+    "reportScheduleRecipientsInput",
+    "saveReportScheduleButton",
+    "reportScheduleMessage",
+    "reportScheduleList",
     "caseIdInput",
     "caseTitleInput",
     "caseAssigneeInput",
@@ -360,6 +418,34 @@ function cacheElements() {
     "auditActionFilterInput",
     "auditActorFilterInput",
     "auditReviewList",
+    "stitchWindowSelect",
+    "stitchConfidenceSelect",
+    "rebuildStitchingButton",
+    "exportStitchingButton",
+    "stitchStatus",
+    "stitchMetricGrid",
+    "stitchChainList",
+    "stitchDetail",
+    "stitchGapList",
+    "topologyViewHeading",
+    "topologyModeControl",
+    "heatmapStatusLabel",
+    "heatmapToolbar",
+    "heatmapGroupSelect",
+    "heatmapMetricSelect",
+    "heatmapScaleSelect",
+    "heatmapEvidenceFilter",
+    "heatmapZoomOutButton",
+    "heatmapZoomInButton",
+    "heatmapPanLeftButton",
+    "heatmapPanRightButton",
+    "heatmapPanUpButton",
+    "heatmapPanDownButton",
+    "heatmapResetViewButton",
+    "exportHeatmapButton",
+    "heatmapContextBar",
+    "heatmapSelectionLabel",
+    "clearHeatmapSelectionButton",
     "topologyCanvas",
     "playReplayButton",
     "stepReplayBackButton",
@@ -469,11 +555,12 @@ function cacheElements() {
 }
 
 function wireEvents() {
-  els.fileInput.addEventListener("change", (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      readFile(file);
+  els.fileInput.addEventListener("change", async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (files?.length) {
+      await readFiles(files);
     }
+    event.target.value = "";
   });
 
   ["dragenter", "dragover"].forEach((type) => {
@@ -491,11 +578,11 @@ function wireEvents() {
   });
 
   els.dropZone.addEventListener("drop", (event) => {
-    const file = event.dataTransfer.files[0];
-    if (file) {
-      readFile(file);
+    const files = event.dataTransfer.files;
+    if (files?.length) {
+      readFiles(files);
     } else {
-      setInputMessage("Drop a .log, .txt, .csv, .json, .jsonl, or .gz file.");
+      setInputMessage("Drop one or more .log, .txt, .csv, .json, .jsonl, or .gz files.");
     }
   });
 
@@ -527,13 +614,25 @@ function wireEvents() {
   });
 
   els.resetFiltersButton.addEventListener("click", () => {
+    const hadHeatmapSelection = Boolean(state.heatmap.selection);
+    const hadExecutiveSelection = Boolean(state.executive.evidenceRecords);
+    state.heatmap.selection = null;
+    state.executive.evidenceRecords = null;
+    state.executive.selectedFindingId = "";
     els.searchInput.value = "";
     els.actionFilter.value = "all";
     els.protocolFilter.value = "all";
+    els.evidenceSourceFilter.value = "all";
     applyFilters();
+    if (hadHeatmapSelection || hadExecutiveSelection) {
+      renderFindings(state.analysis?.detections || []);
+      rebuildEventStitching(false);
+      renderTopology();
+      renderTopFindings();
+    }
   });
 
-  [els.searchInput, els.actionFilter, els.protocolFilter].forEach((input) => {
+  [els.searchInput, els.actionFilter, els.protocolFilter, els.evidenceSourceFilter].forEach((input) => {
     input.addEventListener("input", applyFilters);
   });
 
@@ -545,7 +644,7 @@ function wireEvents() {
   });
 
   els.severityFilter.addEventListener("input", () => {
-    renderFindings(state.analysis?.detections || []);
+    renderFindings(findingsForHeatmapSelection(state.analysis?.detections || []));
   });
   els.ruleProfileSelect.addEventListener("change", updateRuleProfileDescription);
   els.applyRuleProfileButton.addEventListener("click", applyRuleProfile);
@@ -618,6 +717,25 @@ function wireEvents() {
   els.exportOcsfButton.addEventListener("click", () => exportDetectionsStructured("ocsf"));
   els.exportCefButton.addEventListener("click", exportDetectionsCef);
   els.exportRedactedButton.addEventListener("click", exportRedactedRecords);
+  [els.topFindingsPeriod, els.topFindingsSource, els.topFindingsSeverity, els.topFindingsEnvironment].forEach((input) => {
+    input.addEventListener("input", renderTopFindings);
+  });
+  els.resetTopFindingsButton.addEventListener("click", resetTopFindingsFilters);
+  els.topFindingsTable.addEventListener("click", handleTopFindingAction);
+  els.topFindingDetail.addEventListener("click", handleTopFindingAction);
+  els.generateExecutiveBriefButton.addEventListener("click", generateExecutiveBrief);
+  els.exportExecutivePdfButton.addEventListener("click", () => exportExecutiveBrief("pdf"));
+  els.exportExecutiveCsvButton.addEventListener("click", () => exportExecutiveBrief("csv"));
+  els.exportExecutiveJsonButton.addEventListener("click", () => exportExecutiveBrief("json"));
+  els.reportScheduleForm.addEventListener("submit", saveReportSchedule);
+  els.reportScheduleList.addEventListener("click", (event) => {
+    const pause = event.target.closest("[data-pause-report-schedule]");
+    const remove = event.target.closest("[data-delete-report-schedule]");
+    const run = event.target.closest("[data-run-report-schedule]");
+    if (pause) toggleReportSchedule(pause.dataset.pauseReportSchedule);
+    if (remove) deleteReportSchedule(remove.dataset.deleteReportSchedule);
+    if (run) runReportSchedule(run.dataset.runReportSchedule, false);
+  });
 
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -733,6 +851,38 @@ function wireEvents() {
   els.stepReplayBackButton.addEventListener("click", () => stepTopologyReplay(-10));
   els.stepReplayForwardButton.addEventListener("click", () => stepTopologyReplay(10));
   els.replayRangeInput.addEventListener("input", renderTopology);
+  els.topologyModeControl.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-topology-mode]");
+    if (!button) return;
+    setTopologyMode(button.dataset.topologyMode);
+  });
+  [els.heatmapGroupSelect, els.heatmapMetricSelect, els.heatmapScaleSelect, els.heatmapEvidenceFilter].forEach((input) => {
+    input.addEventListener("change", updateHeatmapOptions);
+  });
+  els.heatmapZoomOutButton.addEventListener("click", () => zoomHeatmap(-1));
+  els.heatmapZoomInButton.addEventListener("click", () => zoomHeatmap(1));
+  els.heatmapPanLeftButton.addEventListener("click", () => panHeatmap(-1, 0));
+  els.heatmapPanRightButton.addEventListener("click", () => panHeatmap(1, 0));
+  els.heatmapPanUpButton.addEventListener("click", () => panHeatmap(0, -1));
+  els.heatmapPanDownButton.addEventListener("click", () => panHeatmap(0, 1));
+  els.heatmapResetViewButton.addEventListener("click", resetHeatmapView);
+  els.clearHeatmapSelectionButton.addEventListener("click", clearHeatmapSelection);
+  els.exportHeatmapButton.addEventListener("click", exportHeatmapView);
+  els.topologyCanvas.addEventListener("wheel", handleHeatmapWheel, { passive: false });
+  els.topologyCanvas.addEventListener("pointerdown", startHeatmapDrag);
+  els.topologyCanvas.addEventListener("pointermove", moveHeatmapDrag);
+  els.topologyCanvas.addEventListener("pointerup", endHeatmapDrag);
+  els.topologyCanvas.addEventListener("pointercancel", endHeatmapDrag);
+  els.topologyCanvas.addEventListener("keydown", handleHeatmapKeydown);
+  els.rebuildStitchingButton.addEventListener("click", () => rebuildEventStitching(true));
+  [els.stitchWindowSelect, els.stitchConfidenceSelect].forEach((input) => input.addEventListener("change", () => rebuildEventStitching(true)));
+  els.exportStitchingButton.addEventListener("click", exportStitchedIncidents);
+  els.stitchChainList.addEventListener("click", (event) => {
+    const chain = event.target.closest("[data-stitch-chain]");
+    if (!chain) return;
+    state.stitching.selectedChainId = chain.dataset.stitchChain;
+    renderEventStitching();
+  });
   els.confirmDialog.addEventListener("close", () => {
     if (els.confirmDialog.returnValue === "confirm" && state.pendingConfirm) {
       state.pendingConfirm();
@@ -761,6 +911,11 @@ function activateTab(tabName) {
   }
   if (tabName === "overview") operationsController?.refresh(false);
   if (tabName === "cases") operationsController?.refreshCaseTasks();
+  if (tabName === "reports") renderExecutiveReporting();
+  if (tabName === "topology") {
+    renderTopology();
+    renderEventStitching();
+  }
 }
 
 function clearCurrentEvidence() {
@@ -771,6 +926,10 @@ function clearCurrentEvidence() {
   state.errors = [];
   state.fileName = "";
   state.rawEvidenceText = "";
+  state.evidenceSources = [];
+  state.stitching = { events: [], result: null, selectedChainId: "" };
+  state.heatmap = { ...state.heatmap, zoom: 1, panRatio: 0, panX: 0, panY: 0, selection: null, model: null, drag: null };
+  state.executive = { ...state.executive, topFindings: [], selectedFindingId: "", evidenceRecords: null, currentReport: null };
   state.selectedEntity = null;
   state.huntResults = [];
   els.fileInput.value = "";
@@ -779,13 +938,17 @@ function clearCurrentEvidence() {
   els.searchInput.value = "";
   els.actionFilter.value = "all";
   els.protocolFilter.value = "all";
-  els.fileMeta.textContent = ".log, .txt, .csv, .gz, or JSON";
+  els.evidenceSourceFilter.innerHTML = `<option value="all">All evidence sources</option>`;
+  els.fileMeta.textContent = "Drop one or more log, CSV, gzip, or JSON files";
+  renderEvidenceSources();
   clearInputMessage();
   renderEmptyDashboard();
   showToast("Current evidence cleared.");
 }
 
 function setBusy(isBusy, label = "Working") {
+  state.busy = isBusy;
+  els.fileInput.disabled = isBusy;
   [
     els.analyzeButton,
     els.sampleButton,
@@ -815,19 +978,53 @@ function clearInputMessage() {
   els.inputMessage.hidden = true;
 }
 
+async function loadEventStitchingApi() {
+  if (eventStitchingApi) return eventStitchingApi;
+  if (!eventStitchingPromise) eventStitchingPromise = import("./src/event-stitching.mjs");
+  eventStitchingApi = await eventStitchingPromise;
+  return eventStitchingApi;
+}
+
+function normalizeEvidenceForStitching(stitching, text, context, flowRecords) {
+  const structured = stitching.parseStitchingTelemetry(text, context);
+  if (structured.events.length) return structured;
+  return stitching.parseStitchingTelemetry(text, { ...context, flowRecords });
+}
+
+async function parseEvidenceTelemetry(text, context, flowRecords) {
+  try {
+    const stitching = await loadEventStitchingApi();
+    return normalizeEvidenceForStitching(stitching, text, context, flowRecords);
+  } catch (error) {
+    return {
+      events: [],
+      errors: [],
+      formats: [],
+      unavailable: true,
+      message: error.message || "Event stitching module is unavailable"
+    };
+  }
+}
+
 async function initializePersistentData() {
   try {
     purgeLegacyStorageKeys();
-    const [loadedIdbApi, loadedBackendApi, loadedTopologyApi, platformUiApi, operationsUiApi] = await Promise.all([
+    const [loadedIdbApi, loadedBackendApi, loadedTopologyApi, loadedEventStitchingApi, loadedNetworkHeatmapApi, loadedExecutiveReportingApi, platformUiApi, operationsUiApi] = await Promise.all([
       import("./src/idb-store.js"),
       import("./src/backend-client.js"),
       import("./src/topology.js"),
+      loadEventStitchingApi(),
+      import("./src/network-heatmap.mjs?v=0.3.3"),
+      import("./src/executive-reporting.mjs?v=0.4.0"),
       import("./src/platform-ui.mjs"),
       import("./src/operations-ui.mjs")
     ]);
     idbApi = loadedIdbApi;
     backendApi = loadedBackendApi;
     topologyApi = loadedTopologyApi;
+    eventStitchingApi = loadedEventStitchingApi;
+    networkHeatmapApi = loadedNetworkHeatmapApi;
+    executiveReportingApi = loadedExecutiveReportingApi;
     const loginResult = await backendApi.completeSsoCallback();
     if (loginResult?.principal) showToast(`Signed in as ${loginResult.principal.name || loginResult.principal.subject}.`);
     await refreshBackendStatus();
@@ -977,6 +1174,7 @@ async function saveWorkspaceSnapshot() {
     bytes: state.analysis?.totals?.bytes || 0,
     sourceCount: loadJson(STORAGE_KEYS.sources, []).length,
     sources: loadJson(STORAGE_KEYS.sources, []),
+    evidenceSources: state.evidenceSources,
     hunts: loadJson(STORAGE_KEYS.hunts, []),
     enrichment: state.enrichment,
     ruleProfile: loadJson(STORAGE_KEYS.ruleProfile, "balanced"),
@@ -1107,17 +1305,63 @@ function confirmAction({ title, body, confirmLabel = "Confirm", onConfirm }) {
   els.confirmDialog.showModal();
 }
 
-async function readFile(file) {
-  setBusy(true, `Reading ${file.name}`);
+async function readFiles(fileList) {
+  if (state.busy) {
+    setInputMessage("Wait for the current evidence analysis to finish before adding another batch.");
+    return;
+  }
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  if (files.length > MAX_BROWSER_BATCH_FILES) {
+    setInputMessage(`Select no more than ${MAX_BROWSER_BATCH_FILES} files per browser analysis batch.`);
+    return;
+  }
+
+  setBusy(true, `Reading ${files.length} evidence source${files.length === 1 ? "" : "s"}`);
   clearInputMessage();
+  const inputs = [];
+  const rawParts = [];
+  const batchTenantId = state.backend.principal?.tenantId || "local-browser";
+  let decodedBytes = 0;
   try {
-    const text = await readFileText(file);
-    els.pasteInput.value = text.slice(0, 70000);
-    els.fileMeta.textContent = `${file.name} - ${formatBytes(file.size)}`;
-    await runAnalysis(text, file.name);
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      setBusy(true, `Reading ${index + 1} of ${files.length}: ${file.name}`);
+      try {
+        const text = await readFileText(file);
+        const textBytes = browserTextBytes(text);
+        if (decodedBytes + textBytes > MAX_BROWSER_TEXT_BYTES) {
+          throw new Error(`Combined decoded evidence exceeds the ${formatBytes(MAX_BROWSER_TEXT_BYTES)} browser batch limit`);
+        }
+        decodedBytes += textBytes;
+        const sourceId = `evidence-source-${index + 1}`;
+        const parsed = parseVpcFlowLog(text);
+        const telemetry = await parseEvidenceTelemetry(text, {
+          sourceId,
+          sourceName: file.name,
+          tenantId: batchTenantId
+        }, parsed.records);
+        inputs.push({ id: sourceId, name: file.name, size: file.size, textBytes, parsed, telemetry });
+        rawParts.push(`# SignalPrism evidence source: ${safeEvidenceSourceName(file.name)}\n${text}`);
+      } catch (error) {
+        inputs.push({
+          id: `evidence-source-${index + 1}`,
+          name: file.name,
+          size: file.size,
+          error: error.message || "File could not be read"
+        });
+      }
+    }
+
+    const merged = mergeParsedEvidence(inputs);
+    const batchName = evidenceBatchName(merged.sources);
+    const rawEvidenceText = rawParts.join("\n\n");
+    els.pasteInput.value = rawEvidenceText.slice(0, 70000);
+    els.fileMeta.textContent = `${formatNumber(files.length)} file${files.length === 1 ? "" : "s"} - ${formatBytes(files.reduce((total, file) => total + file.size, 0))}`;
+    await commitParsedEvidence(merged, batchName, rawEvidenceText);
   } catch (error) {
-    setStatus(error.message || "File could not be read", "warn");
-    setInputMessage(error.message || "File could not be read.");
+    setStatus("Evidence batch failed", "warn");
+    setInputMessage(error.message || "The evidence batch could not be analyzed.");
   } finally {
     setBusy(false);
   }
@@ -1150,36 +1394,140 @@ async function runAnalysis(text, fileName) {
   clearInputMessage();
   try {
     assertBrowserTextSize(text);
+    const sourceId = "evidence-source-1";
     const parsed = parseVpcFlowLog(text);
-    state.records = parsed.records;
-    state.filtered = parsed.records;
-    state.fields = parsed.fields;
-    state.errors = parsed.errors;
-    state.fileName = fileName;
-    state.rawEvidenceText = text;
-    state.analysis = analyzeRecords(parsed.records, parsed.errors);
-    enrichAnalysis(state.analysis);
-    applyBaselineObservations(state.analysis);
-    applyDetectionPolicy(state.analysis);
-    persistHistory(fileName, state.analysis);
-    const persistence = await persistEvidenceIndexedDb(fileName, parsed.records, state.analysis);
-
-    refreshProtocolFilter(parsed.records);
-    applyFilters();
-    renderDashboard();
-    updateStatus();
-    if (!parsed.records.length) {
-      setInputMessage("No records were parsed. Check the field order, delimiter, or pasted text.");
-    } else {
-      const retained = persistence.backendRetained ? " and retained" : "";
-      showToast(`${formatNumber(parsed.records.length)} records analyzed${retained} from ${fileName}.`);
-    }
+    const telemetry = await parseEvidenceTelemetry(text, {
+      sourceId,
+      sourceName: fileName,
+      tenantId: state.backend.principal?.tenantId || "local-browser"
+    }, parsed.records);
+    const merged = mergeParsedEvidence([{ id: sourceId, name: fileName, textBytes: browserTextBytes(text), parsed, telemetry }]);
+    await commitParsedEvidence(merged, fileName, text);
   } catch (error) {
     setStatus("Analysis failed", "warn");
     setInputMessage(error.message || "Analysis failed.");
   } finally {
     setBusy(false);
   }
+}
+
+async function commitParsedEvidence(merged, fileName, rawEvidenceText) {
+  try {
+    state.records = merged.records;
+    state.filtered = merged.records;
+    state.fields = merged.fields;
+    state.errors = merged.errors;
+    state.fileName = fileName;
+    state.rawEvidenceText = rawEvidenceText;
+    state.evidenceSources = merged.sources;
+    state.stitching.events = merged.events;
+    state.heatmap.selection = null;
+    state.heatmap.model = null;
+    state.heatmap.zoom = 1;
+    state.heatmap.panRatio = 0;
+    state.heatmap.panX = 0;
+    state.heatmap.panY = 0;
+    rebuildEventStitching(false);
+    state.analysis = analyzeRecords(merged.records, merged.errors);
+    enrichAnalysis(state.analysis);
+    applyBaselineObservations(state.analysis);
+    applyDetectionPolicy(state.analysis);
+    persistHistory(fileName, state.analysis);
+    const persistence = await persistEvidenceIndexedDb(fileName, merged.records, state.analysis);
+
+    refreshProtocolFilter(merged.records);
+    refreshEvidenceSourceFilter(merged.sources);
+    renderEvidenceSources();
+    applyFilters();
+    renderDashboard();
+    updateStatus();
+    if (!merged.records.length && !merged.events.length) {
+      setInputMessage("No supported events were parsed. Check the source format, field order, delimiter, or pasted text.");
+    } else {
+      const retained = persistence.backendRetained ? " and retained" : "";
+      const failed = merged.sources.filter((source) => source.status === "failed").length;
+      const partial = failed ? `; ${failed} source${failed === 1 ? "" : "s"} could not be parsed` : "";
+      showToast(`${formatNumber(merged.records.length)} flows and ${formatNumber(merged.events.length)} normalized events analyzed${retained} from ${formatNumber(merged.sources.length)} source${merged.sources.length === 1 ? "" : "s"}${partial}.`, failed ? "warn" : "success");
+    }
+  } catch (error) {
+    setStatus("Analysis failed", "warn");
+    setInputMessage(error.message || "Analysis failed.");
+  }
+}
+
+function mergeParsedEvidence(inputs) {
+  const records = [];
+  const events = [];
+  const errors = [];
+  const fields = new Set();
+  const sources = [];
+
+  (inputs || []).forEach((input, index) => {
+    const id = input.id || `evidence-source-${index + 1}`;
+    const name = input.name || `Evidence source ${index + 1}`;
+    const parsed = input.parsed || null;
+    const telemetry = input.telemetry || null;
+    const sourceEvents = telemetry?.events || [];
+    const structuredTelemetry = sourceEvents.length && !(telemetry?.formats || []).some((format) => STITCHING_FLOW_FORMATS.has(format));
+    const sourceRecords = structuredTelemetry ? [] : parsed?.records || [];
+    const flowErrors = structuredTelemetry ? [] : parsed?.errors || [];
+    const telemetryErrors = telemetry?.errors || [];
+    const sourceErrors = sourceRecords.length ? flowErrors : sourceEvents.length ? telemetryErrors : [...flowErrors, ...telemetryErrors];
+    const hasEvidence = sourceRecords.length || sourceEvents.length;
+    let status = input.error || !hasEvidence ? "failed" : sourceErrors.length ? "warning" : "ready";
+    let errorMessage = input.error || "";
+    if (!input.error && parsed && !hasEvidence) errorMessage = "No supported flow or telemetry events were parsed";
+
+    sourceRecords.forEach((record) => records.push({
+      ...record,
+      evidenceSource: name,
+      evidenceSourceId: id,
+      sourceLineNumber: record.lineNumber
+    }));
+    sourceEvents.forEach((event) => events.push({ ...event, evidenceSource: name, evidenceSourceId: id }));
+    sourceErrors.forEach((issue) => errors.push({
+      ...issue,
+      line: issue.line || (Number.isInteger(issue.index) ? issue.index + 1 : null),
+      source: name,
+      sourceId: id
+    }));
+    (parsed?.fields || []).forEach((field) => fields.add(field));
+    if (errorMessage) errors.push({ line: null, message: errorMessage, source: name, sourceId: id });
+    if (!parsed && !errorMessage) {
+      status = "failed";
+      errors.push({ line: null, message: "File could not be parsed", source: name, sourceId: id });
+    }
+    sources.push({
+      id,
+      name,
+      size: Number(input.size || 0),
+      textBytes: Number(input.textBytes || 0),
+      records: sourceRecords.length,
+      events: sourceEvents.length,
+      errors: sourceErrors.length + (errorMessage ? 1 : 0),
+      fields: parsed?.fields || [],
+      formats: telemetry?.formats || [],
+      status,
+      message: errorMessage
+    });
+  });
+
+  return { records, events, errors, fields: [...fields], sources };
+}
+
+function evidenceBatchName(sources) {
+  const names = (sources || []).map((source) => source.name);
+  if (!names.length) return "Evidence batch";
+  if (names.length === 1) return names[0];
+  return `${names.length} files: ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}`;
+}
+
+function safeEvidenceSourceName(name) {
+  return String(name || "evidence").replace(/[\r\n\u0000-\u001f\u007f]/g, " ").slice(0, 240);
+}
+
+function browserTextBytes(text) {
+  return new TextEncoder().encode(String(text || "")).byteLength;
 }
 
 async function readBoundedTextStream(stream, maxBytes) {
@@ -2259,12 +2607,17 @@ function applyFilters() {
   const query = els.searchInput.value.trim().toLowerCase();
   const action = els.actionFilter.value;
   const protocol = els.protocolFilter.value;
+  const evidenceSource = els.evidenceSourceFilter.value;
 
   state.filtered = state.records.filter((record) => {
     const matchesAction = action === "all" || record.action === action;
     const matchesProtocol = protocol === "all" || record.protocol === protocol;
+    const matchesEvidenceSource = evidenceSource === "all" || record.evidenceSourceId === evidenceSource;
+    const matchesHeatmap = !state.heatmap.selection || !networkHeatmapApi?.recordMatchesHeatmapSelection || networkHeatmapApi.recordMatchesHeatmapSelection(record, state.heatmap.selection);
+    const matchesExecutiveFinding = !state.executive.evidenceRecords || state.executive.evidenceRecords.has(record);
     const haystack = [
       record.interfaceId,
+      record.evidenceSource,
       record.source,
       record.destination,
       record.srcPort,
@@ -2276,7 +2629,7 @@ function applyFilters() {
       .join(" ")
       .toLowerCase();
     const matchesSearch = !query || haystack.includes(query);
-    return matchesAction && matchesProtocol && matchesSearch;
+    return matchesAction && matchesProtocol && matchesEvidenceSource && matchesSearch && matchesHeatmap && matchesExecutiveFinding;
   });
 
   renderRecordsTable();
@@ -2291,6 +2644,13 @@ function refreshProtocolFilter(records) {
   if (protocols.includes(current)) {
     els.protocolFilter.value = current;
   }
+}
+
+function refreshEvidenceSourceFilter(sources) {
+  const available = (sources || []).filter((source) => source.records > 0);
+  els.evidenceSourceFilter.innerHTML = `<option value="all">All evidence sources</option>${available
+    .map((source) => `<option value="${escapeHtml(source.id)}">${escapeHtml(source.name)} (${formatNumber(source.records)})</option>`)
+    .join("")}`;
 }
 
 function renderDashboard() {
@@ -2322,15 +2682,17 @@ function renderDashboard() {
   renderRankList(els.internalPaths, analysis.internalPaths, "bytes");
   renderRankList(els.externalPaths, analysis.externalPaths, "bytes");
   renderEntityRisk(analysis.entityRisk);
-  renderFindings(analysis.detections);
+  renderFindings(findingsForHeatmapSelection(analysis.detections));
   renderObservations(analysis.observations || []);
   renderApplicationMix();
+  renderTopFindings();
   renderCoverage();
   renderHistory();
   renderSavedHunts();
   renderOptimization();
   renderAnalystSummary();
   renderPolicyRecommendations();
+  renderEventStitching();
   renderTopology();
   renderEnterprise();
   if (!state.selectedEntity && analysis.entityRisk[0]) {
@@ -2339,6 +2701,136 @@ function renderDashboard() {
     renderEntityDetail();
   }
   renderImportQuality();
+}
+
+async function renderTopFindings() {
+  if (!els.topFindingsTable || !executiveReportingApi) return;
+  refreshTopFindingFilterOptions();
+  if (!state.analysis) {
+    els.topFindingsTable.innerHTML = `<tr><td colspan="10">${emptyState()}</td></tr>`;
+    els.topFindingsStatus.textContent = "Analyze evidence to rank findings.";
+    els.topFindingDetail.innerHTML = "";
+    return;
+  }
+  const token = ++state.executive.renderToken;
+  const cases = await listCaseRecords().catch(() => []);
+  if (token !== state.executive.renderToken) return;
+  const findings = executiveReportingApi.buildTopFindings({
+    detections: state.analysis.detections || [],
+    records: state.records,
+    assets: loadJson(STORAGE_KEYS.assetContext, {}),
+    threatIntel: loadJson(STORAGE_KEYS.threatIntel, {}),
+    cases,
+    filters: {
+      period: els.topFindingsPeriod.value,
+      source: els.topFindingsSource.value,
+      severity: els.topFindingsSeverity.value,
+      environment: els.topFindingsEnvironment.value
+    },
+    limit: 10
+  });
+  state.executive.topFindings = findings;
+  if (!findings.some((finding) => finding.id === state.executive.selectedFindingId)) state.executive.selectedFindingId = findings[0]?.id || "";
+  const active = findings.find((finding) => finding.id === state.executive.selectedFindingId) || findings[0] || null;
+  els.topFindingsStatus.textContent = findings.length
+    ? `${findings.length} consolidated finding${findings.length === 1 ? "" : "s"} ranked by severity, confidence, business context, exposure, breadth, velocity, intelligence, and case pressure.`
+    : "No findings match the current period and context filters.";
+  els.topFindingsTable.innerHTML = findings.length
+    ? findings.map((finding) => topFindingRow(finding, finding.id === active?.id)).join("")
+    : `<tr><td colspan="10">${emptyState()}</td></tr>`;
+  renderTopFindingDetail(active);
+}
+
+function refreshTopFindingFilterOptions() {
+  const sourceValue = els.topFindingsSource.value || "all";
+  const sources = state.evidenceSources?.length
+    ? state.evidenceSources
+    : [...new Map(state.records.filter((record) => record.evidenceSourceId || record.evidenceSource).map((record) => [record.evidenceSourceId || record.evidenceSource, { id: record.evidenceSourceId || record.evidenceSource, name: record.evidenceSource || record.evidenceSourceId }])).values()];
+  els.topFindingsSource.innerHTML = `<option value="all">All sources</option>${sources.map((source) => `<option value="${escapeHtml(source.id || source.name)}">${escapeHtml(source.name || source.id)}</option>`).join("")}`;
+  if ([...els.topFindingsSource.options].some((option) => option.value === sourceValue)) els.topFindingsSource.value = sourceValue;
+
+  const environmentValue = els.topFindingsEnvironment.value || "all";
+  const assets = loadJson(STORAGE_KEYS.assetContext, {});
+  const environments = [...new Set(Object.values(assets).map((asset) => asset?.environment).filter(Boolean))].sort();
+  els.topFindingsEnvironment.innerHTML = `<option value="all">All environments</option>${environments.map((environment) => `<option value="${escapeHtml(environment)}">${escapeHtml(environment)}</option>`).join("")}`;
+  if ([...els.topFindingsEnvironment.options].some((option) => option.value === environmentValue)) els.topFindingsEnvironment.value = environmentValue;
+}
+
+function topFindingRow(finding, selected) {
+  const affected = finding.assets.length
+    ? finding.assets.slice(0, 2).map((asset) => asset.label || asset.key).join(", ")
+    : finding.entities.slice(0, 2).join(", ") || "Unknown";
+  const trendLabel = finding.trend === "new" ? "New" : finding.trend === "up" ? `Up ${Math.abs(finding.trendDelta)}` : finding.trend === "down" ? `Down ${Math.abs(finding.trendDelta)}` : "Flat";
+  const lastSeen = finding.lastSeenMs ? formatDate(finding.lastSeenMs) : "Unknown";
+  const sourceCount = Math.max(1, finding.sourceNames.length);
+  return `<tr class="${selected ? "selected" : ""}" data-top-finding-row="${escapeHtml(finding.id)}">
+    <td><strong>${finding.rank}</strong></td>
+    <td><strong>${escapeHtml(finding.title)}</strong><span>${escapeHtml([finding.tactic, finding.technique].filter(Boolean).join(" / "))}</span></td>
+    <td><span class="urgency-score ${escapeHtml(finding.urgencyLabel.toLowerCase())}">${finding.urgency}</span></td>
+    <td><strong class="trend-indicator ${escapeHtml(finding.trend)}">${escapeHtml(trendLabel)}</strong><span>${finding.currentCount} current / ${finding.previousCount} prior</span></td>
+    <td><strong>${escapeHtml(affected)}</strong><span>${escapeHtml(finding.environment)}</span></td>
+    <td><strong>${finding.blastRadius}</strong><span>entit${finding.blastRadius === 1 ? "y" : "ies"}</span></td>
+    <td><strong>${Math.round(finding.confidence * 100)}%</strong><span>${sourceCount} source${sourceCount === 1 ? "" : "s"}</span></td>
+    <td><strong>${escapeHtml(finding.owner)}</strong><span>${escapeHtml(finding.status)}</span></td>
+    <td><strong>${escapeHtml(lastSeen)}</strong><span>${finding.records.length} evidence row${finding.records.length === 1 ? "" : "s"}</span></td>
+    <td><button class="mini-button" type="button" data-top-finding="${escapeHtml(finding.id)}">Explain</button></td>
+  </tr>`;
+}
+
+function renderTopFindingDetail(finding) {
+  if (!finding) {
+    els.topFindingDetail.innerHTML = "";
+    return;
+  }
+  els.topFindingDetail.innerHTML = `<div class="finding-score-detail">
+    <div class="finding-score-summary">
+      <p class="panel-kicker">Urgency ${finding.urgency}/100 - ${escapeHtml(finding.urgencyLabel)}</p>
+      <h3>${escapeHtml(finding.title)}</h3>
+      <p>${escapeHtml(finding.copy || "Review the linked evidence and business context before disposition.")}</p>
+      <div class="button-row">
+        <button class="ghost-button compact" type="button" data-top-evidence="${escapeHtml(finding.id)}" ${finding.records.length ? "" : "disabled title=\"No linked evidence rows\""}>View evidence</button>
+      </div>
+    </div>
+    <div class="finding-score-factors" aria-label="Urgency score factors">
+      ${finding.factors.map((item) => `<div class="score-factor-row">
+        <strong>${escapeHtml(item.label)}</strong><span>${item.score}/${item.maximum} - ${escapeHtml(item.evidence)}</span>
+        <div class="score-factor-track" aria-hidden="true"><i style="width:${item.maximum ? Math.round(item.score / item.maximum * 100) : 0}%"></i></div>
+      </div>`).join("")}
+    </div>
+  </div>`;
+}
+
+function handleTopFindingAction(event) {
+  const explain = event.target.closest("[data-top-finding]");
+  const evidence = event.target.closest("[data-top-evidence]");
+  const id = evidence?.dataset.topEvidence || explain?.dataset.topFinding;
+  if (!id) return;
+  const finding = state.executive.topFindings.find((item) => item.id === id);
+  if (!finding) return;
+  state.executive.selectedFindingId = id;
+  if (evidence) {
+    if (!finding.records.length) return setInputMessage("This finding has no directly linked evidence rows.");
+    state.executive.evidenceRecords = new Set(finding.records);
+    applyFilters();
+    renderFindings(findingsForHeatmapSelection(state.analysis?.detections || []));
+    activateTab("records");
+    showToast(`${formatNumber(finding.records.length)} linked evidence row${finding.records.length === 1 ? "" : "s"} selected.`);
+    return;
+  }
+  els.topFindingsTable.querySelectorAll("tr").forEach((row) => row.classList.toggle("selected", row.dataset.topFindingRow === id));
+  renderTopFindingDetail(finding);
+}
+
+function resetTopFindingsFilters() {
+  els.topFindingsPeriod.value = "evidence";
+  els.topFindingsSource.value = "all";
+  els.topFindingsSeverity.value = "all";
+  els.topFindingsEnvironment.value = "all";
+  state.executive.evidenceRecords = null;
+  state.executive.selectedFindingId = "";
+  applyFilters();
+  renderFindings(findingsForHeatmapSelection(state.analysis?.detections || []));
+  renderTopFindings();
 }
 
 function renderEmptyDashboard() {
@@ -2353,6 +2845,9 @@ function renderEmptyDashboard() {
   els.timelineChart.style.setProperty("--bucket-count", 1);
   els.timelineChart.innerHTML = emptyState();
   els.timeRangeLabel.textContent = "-";
+  if (els.topFindingsTable) els.topFindingsTable.innerHTML = `<tr><td colspan="10">${emptyState()}</td></tr>`;
+  if (els.topFindingDetail) els.topFindingDetail.innerHTML = "";
+  if (els.topFindingsStatus) els.topFindingsStatus.textContent = "Analyze evidence to rank findings.";
   [els.priorityEntities, els.topPorts, els.topRejected, els.protocolMix, els.findingList, els.entityRiskList, els.internalPaths, els.externalPaths].forEach((el) => {
     el.innerHTML = emptyState();
   });
@@ -2367,6 +2862,9 @@ function renderEmptyDashboard() {
     els.analystSummary,
     els.policyRecommendations,
     els.entityDetail,
+    els.stitchChainList,
+    els.stitchDetail,
+    els.stitchGapList,
     els.topologyCanvas,
     els.replayEventList,
     els.enterpriseCoverageList,
@@ -2385,6 +2883,15 @@ function renderEmptyDashboard() {
   els.entityDetailTitle.textContent = "Select an entity";
   els.entityDetailMeta.textContent = "No entity selected";
   els.replayTimeLabel.textContent = "All evidence";
+  if (els.stitchStatus) els.stitchStatus.textContent = "No normalized evidence";
+  if (els.stitchMetricGrid) {
+    els.stitchMetricGrid.innerHTML = [
+      metricTemplate("Incident chains", "0", "multi-source"),
+      metricTemplate("Explainable links", "0", "confidence-scored"),
+      metricTemplate("Normalized events", "0", "0 formats"),
+      metricTemplate("Conflicts", "0", "unsafe joins blocked")
+    ].join("");
+  }
   if (els.replayEventCountLabel) els.replayEventCountLabel.textContent = "0 of 0 records";
   if (els.playReplayButton) els.playReplayButton.textContent = "Play";
   if (state.replayTimer) {
@@ -2416,14 +2923,36 @@ function renderImportQuality() {
   }
 
   if (!issues.length) {
-    els.parseIssueList.innerHTML = `<div class="issue-item"><strong>No parser issues</strong>${escapeHtml(formatNumber(state.records.length))} records parsed using ${escapeHtml(formatNumber(state.fields.length))} fields.</div>`;
+    const sourceCount = Math.max(1, state.evidenceSources.filter((source) => source.records > 0 || source.events > 0).length);
+    els.parseIssueList.innerHTML = `<div class="issue-item"><strong>No parser issues</strong>${escapeHtml(formatNumber(state.records.length))} flows and ${escapeHtml(formatNumber(state.stitching.events.length))} normalized events parsed from ${escapeHtml(formatNumber(sourceCount))} source${sourceCount === 1 ? "" : "s"}.</div>`;
     return;
   }
 
   els.parseIssueList.innerHTML = issues
     .slice(0, 5)
-    .map((issue) => `<div class="issue-item"><strong>Line ${escapeHtml(issue.line)}</strong>${escapeHtml(issue.message)}</div>`)
+    .map((issue) => {
+      const location = issue.source ? `${issue.source}${issue.line ? `, line ${issue.line}` : ""}` : issue.line ? `Line ${issue.line}` : "Evidence source";
+      return `<div class="issue-item"><strong>${escapeHtml(location)}</strong>${escapeHtml(issue.message)}</div>`;
+    })
     .join("");
+}
+
+function renderEvidenceSources() {
+  if (!els.evidenceSourceList) return;
+  const sources = state.evidenceSources || [];
+  if (!sources.length) {
+    els.evidenceSourceList.innerHTML = "";
+    return;
+  }
+  els.evidenceSourceList.innerHTML = sources
+    .slice(0, 6)
+    .map((source) => {
+      const result = source.status === "failed"
+        ? source.message || "Not parsed"
+        : `${formatNumber(source.records)} flows, ${formatNumber(source.events || 0)} events${source.formats?.length ? `, ${source.formats.join(", ")}` : ""}${source.errors ? `, ${formatNumber(source.errors)} issues` : ""}`;
+      return `<div class="evidence-source-item" data-status="${escapeHtml(source.status)}"><strong title="${escapeHtml(source.name)}">${escapeHtml(source.name)}</strong><span>${escapeHtml(result)}</span></div>`;
+    })
+    .join("") + (sources.length > 6 ? `<div class="evidence-source-item"><strong>${formatNumber(sources.length - 6)} more sources</strong><span>Loaded</span></div>` : "");
 }
 
 function renderTimeline(buckets) {
@@ -2630,6 +3159,15 @@ function renderFindings(findings) {
     .join("");
 }
 
+function findingsForHeatmapSelection(findings) {
+  return findings.filter((finding) => {
+    const records = finding.records || [];
+    const matchesHeatmap = !state.heatmap.selection || !networkHeatmapApi?.recordMatchesHeatmapSelection || records.some((record) => networkHeatmapApi.recordMatchesHeatmapSelection(record, state.heatmap.selection));
+    const matchesExecutiveFinding = !state.executive.evidenceRecords || records.some((record) => state.executive.evidenceRecords.has(record));
+    return matchesHeatmap && matchesExecutiveFinding;
+  });
+}
+
 function explainDetection(finding) {
   const title = `${finding.title || ""} ${finding.technique || ""} ${(finding.tags || []).join(" ")}`.toLowerCase();
   if (title.includes("beacon")) return "Repeated accepted outbound connections show a regular timing pattern.";
@@ -2665,7 +3203,7 @@ function isSearchableEntity(entity) {
 function renderRecordsTable() {
   els.recordCountLabel.textContent = `${formatNumber(state.filtered.length)} record${state.filtered.length === 1 ? "" : "s"}`;
   if (!state.filtered.length) {
-    els.recordsTable.innerHTML = `<tr><td colspan="8">${emptyState()}</td></tr>`;
+    els.recordsTable.innerHTML = `<tr><td colspan="9">${emptyState()}</td></tr>`;
     renderSortState();
     return;
   }
@@ -2676,6 +3214,7 @@ function renderRecordsTable() {
     .map(
       (record) => `<tr>
         <td>${escapeHtml(formatDate(record.start))}</td>
+        <td class="evidence-source-cell" title="${escapeHtml(record.evidenceSource || "Unknown source")}">${escapeHtml(record.evidenceSource || "Unknown source")}</td>
         <td><span class="action ${record.action === "REJECT" ? "reject" : ""}">${escapeHtml(record.action)}</span></td>
         <td class="mono">${escapeHtml(formatEndpoint(record.source, record.srcPort))}</td>
         <td class="mono">${escapeHtml(formatEndpoint(record.destination, record.dstPort))}</td>
@@ -2748,7 +3287,7 @@ function matchesHunt(record, query) {
       }
       const field = lower.match(/^([a-z]+):(.+)$/);
       if (!field) {
-        return [record.source, record.destination, record.interfaceId, record.action, record.protocol, record.logStatus, app].join(" ").toLowerCase().includes(lower);
+        return [record.evidenceSource, record.source, record.destination, record.interfaceId, record.action, record.protocol, record.logStatus, app].join(" ").toLowerCase().includes(lower);
       }
       const [, key, value] = field;
       const target = {
@@ -2763,6 +3302,9 @@ function matchesHunt(record, query) {
         protocol: record.protocol,
         status: record.logStatus,
         eni: record.interfaceId,
+        file: record.evidenceSource,
+        evidence: record.evidenceSource,
+        filename: record.evidenceSource,
         app
       }[key];
       return String(target || "").toLowerCase().includes(value);
@@ -3302,6 +3844,9 @@ function renderAiStatus(config, awsConfigured) {
   const enabled = Boolean(config?.enabled);
   els.aiStatusLabel.textContent = enabled ? `${config.modelId} in ${config.region}` : "Feature flag off";
   const disabled = !enabled || !awsConfigured;
+  const bedrockNarrativeOption = els.executiveNarrativeSelect?.querySelector('option[value="bedrock"]');
+  if (bedrockNarrativeOption) bedrockNarrativeOption.disabled = disabled;
+  if (disabled && els.executiveNarrativeSelect?.value === "bedrock") els.executiveNarrativeSelect.value = "evidence";
   els.askAiButton.disabled = disabled;
   els.summarizeAiButton.disabled = disabled;
   els.aiQuestionInput.disabled = disabled;
@@ -3700,7 +4245,7 @@ function parseEnrichment(text) {
         }
       } else {
         const values = parseCsvLine(line);
-        if (index === 0 && values.some((value) => /ip|dst|domain|sni|app/i.test(value))) {
+        if (index === 0 && values.some((value) => /ip|dst|domain|sni|app|latitude|longitude|country|city/i.test(value))) {
           rows.__header = values.map((value) => value.trim());
           return;
         }
@@ -3730,8 +4275,21 @@ function normalizeEnrichment(item) {
     certIssuer: item.certIssuer || item.issuer || "",
     app: item.app || inferAppFromDomain(domain),
     category: item.category || "",
-    ai: item.ai === true || item.ai === "true" || AI_DOMAIN_HINTS.some((hint) => domain.includes(hint))
+    ai: item.ai === true || item.ai === "true" || AI_DOMAIN_HINTS.some((hint) => domain.includes(hint)),
+    latitude: coordinateValue(item.latitude ?? item.lat, -90, 90),
+    longitude: coordinateValue(item.longitude ?? item.lon ?? item.lng, -180, 180),
+    country: item.country || item.countryCode || "",
+    region: item.region || item.state || "",
+    city: item.city || "",
+    geoSource: item.geoSource || item.locationSource || "analyst enrichment",
+    geoPrecision: item.geoPrecision || item.locationPrecision || "approximate"
   };
+}
+
+function coordinateValue(value, minimum, maximum) {
+  if (value === "" || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
 }
 
 function lookupEnrichment(key) {
@@ -4321,8 +4879,8 @@ async function renderExportApprovals() {
           ? `<button class="mini-button" type="button" data-download-export="${escapeHtml(approval.id)}" data-export-kind="${escapeHtml(approval.kind)}">Download</button>`
           : "";
       return `<div class="issue-item">
-        <strong>${escapeHtml(approval.kind === "security-lake" ? "Security Lake export" : "Investigation package")}</strong>
-        <span>${escapeHtml(approval.requestedBy || "unknown")} - ${escapeHtml(approval.status)} - ${escapeHtml(approval.requestedAt ? new Date(approval.requestedAt).toLocaleString() : "")}</span>
+        <strong>${escapeHtml(approval.label || (approval.kind === "security-lake" ? "Security Lake export" : "Investigation package"))}</strong>
+        <span>${escapeHtml(approval.requestedBy || "unknown")} - ${escapeHtml(approval.status)} - ${escapeHtml(String(approval.format || "json").toUpperCase())} - ${escapeHtml(approval.requestedAt ? new Date(approval.requestedAt).toLocaleString() : "")}</span>
         <span class="mono">SHA-256 ${escapeHtml(String(approval.payloadHash || "").slice(0, 20))}</span>
         ${action}
       </div>`;
@@ -4359,7 +4917,8 @@ async function downloadApprovedExport(id, kind) {
       downloadText("signalprism-security-lake-ocsf.ndjson", payload, "application/x-ndjson");
     } else {
       const result = await backendApi.exportInvestigationPackage({ approvalId: id });
-      downloadText(`signalprism-investigation-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(result, null, 2), "application/json");
+      if (result.reportType === "executive-brief" && result.report) downloadExecutiveBriefPayload(result.report, result.format || "json");
+      else downloadText(`signalprism-investigation-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(result, null, 2), "application/json");
     }
     await renderExportApprovals();
     showToast("Approved export downloaded and consumed.");
@@ -4547,10 +5106,17 @@ function applyEnterpriseArtifactsFromBackend(artifacts = []) {
     COPILOT_NOTE: STORAGE_KEYS.copilotNotes,
     PLAYBOOK_RUN: STORAGE_KEYS.playbookRuns,
     EVIDENCE_VAULT_BUNDLE: STORAGE_KEYS.evidenceVault,
-    ENTERPRISE_REPORT: STORAGE_KEYS.enterpriseReports
+    ENTERPRISE_REPORT: STORAGE_KEYS.enterpriseReports,
+    EXECUTIVE_BRIEF: STORAGE_KEYS.executiveBriefs,
+    REPORT_SCHEDULE: STORAGE_KEYS.reportSchedules,
+    REPORT_DELIVERY: STORAGE_KEYS.reportDeliveries
   };
   Object.entries(grouped).forEach(([type, key]) => {
-    const values = artifacts.filter((artifact) => artifact.type === type).map((artifact) => artifact.payload || artifact);
+    const values = artifacts.filter((artifact) => artifact.type === type).map((artifact) => ({
+      ...(artifact.payload || artifact),
+      _artifactRevision: artifact.revision,
+      _artifactCreatedAt: artifact.createdAt
+    }));
     if (values.length) saveJson(key, type === "THREAT_INTEL" ? mergeThreatIntelValues(values) : values.slice(0, 25));
   });
 }
@@ -5108,14 +5674,21 @@ function enterpriseIssue(title, detail, tone = "ok") {
   return `<div class="issue-item ${tone === "warn" ? "warning" : ""}"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div>`;
 }
 
-async function persistEnterpriseArtifact(type, title, payload, status = "active") {
+async function persistEnterpriseArtifact(type, title, payload, status = "active", artifactId = "") {
+  const cleanPayload = payload && typeof payload === "object" ? { ...payload } : payload;
+  const revision = Number(cleanPayload?._artifactRevision || 0);
+  if (cleanPayload && typeof cleanPayload === "object") {
+    delete cleanPayload._artifactRevision;
+    delete cleanPayload._artifactCreatedAt;
+  }
   const artifact = {
-    id: `${String(type).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`,
+    id: artifactId || `${String(type).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`,
     type,
     title,
     status,
-    payload,
-    createdAt: new Date().toISOString()
+    payload: cleanPayload,
+    ...(revision ? { revision } : {}),
+    createdAt: payload?._artifactCreatedAt || new Date().toISOString()
   };
   try {
     if (backendApi?.saveEnterpriseArtifact) return await backendApi.saveEnterpriseArtifact(artifact);
@@ -6196,6 +6769,365 @@ function renderEvidenceVault() {
   els.evidenceVaultList.innerHTML = bundles.slice(0, 5).map((bundle) => enterpriseIssue(bundle.title, `${formatNumber(bundle.counts?.records || 0)} records - retain until ${bundle.retentionUntil?.slice(0, 10) || "not set"} - ${bundle.legalHold ? "legal hold" : "standard hold"}`, bundle.legalHold ? "warn" : "ok")).join("");
 }
 
+async function renderExecutiveReporting() {
+  if (!els.executiveBriefOutput || !executiveReportingApi) return;
+  const canWrite = hasRole("admin") || hasRole("analyst");
+  const canSchedule = hasRole("admin");
+  [els.generateExecutiveBriefButton, els.exportExecutivePdfButton, els.exportExecutiveCsvButton, els.exportExecutiveJsonButton].forEach((button) => {
+    button.disabled = !canWrite;
+    button.title = canWrite ? "" : "Admin or analyst role required";
+  });
+  [els.reportScheduleNameInput, els.reportScheduleFrequencySelect, els.reportSchedulePeriodSelect, els.reportScheduleFormatSelect, els.reportScheduleClassificationSelect, els.reportScheduleRecipientsInput, els.saveReportScheduleButton].forEach((control) => {
+    control.disabled = !canSchedule;
+  });
+  els.reportScheduleAccessLabel.textContent = canSchedule ? "Admin managed - tenant inbox" : "Admin role required";
+  if (!els.executiveOrganizationInput.value) els.executiveOrganizationInput.value = state.backend.principal?.tenantId || "";
+  if (!state.executive.currentReport) state.executive.currentReport = loadJson(STORAGE_KEYS.executiveBriefs, [])[0] || null;
+  renderExecutiveBriefOutput(state.executive.currentReport);
+  renderReportSchedules();
+  if (canSchedule) runDueReportSchedules();
+}
+
+async function generateExecutiveBrief(options = {}) {
+  const settings = typeof options === "object" && options && !(options instanceof Event) ? options : {};
+  if (!executiveReportingApi) return setInputMessage("Executive reporting module is unavailable.");
+  if (!state.analysis && !state.records.length) return setInputMessage("Analyze evidence before generating an executive brief.");
+  if (!hasRole("admin") && !hasRole("analyst")) return setInputMessage("Admin or analyst role is required to generate executive reports.");
+  const period = settings.period || els.executivePeriodSelect.value;
+  const classification = settings.classification || els.executiveClassificationSelect.value;
+  const narrativeMode = settings.narrativeMode || els.executiveNarrativeSelect.value;
+  const organization = String(settings.organization || els.executiveOrganizationInput.value || state.backend.principal?.tenantId || "Current tenant").trim().slice(0, 100);
+  const reports = loadJson(STORAGE_KEYS.executiveBriefs, []);
+  const previousReport = reports.find((report) => report.period?.key === period) || null;
+  const cases = await listCaseRecords().catch(() => []);
+  const report = executiveReportingApi.buildExecutiveBrief({
+    detections: state.analysis?.detections || [],
+    records: state.records,
+    assets: loadJson(STORAGE_KEYS.assetContext, {}),
+    threatIntel: loadJson(STORAGE_KEYS.threatIntel, {}),
+    cases,
+    sourceHealth: buildSourceHealth(loadJson(STORAGE_KEYS.sources, []), loadJson(STORAGE_KEYS.jobRuns, []), state.records, state.errors),
+    activeCampaigns: state.enterprise.campaigns ?? null,
+    responseActions: state.enterprise.responseActions || [],
+    period,
+    previousReport,
+    tenant: { tenantId: state.backend.principal?.tenantId || "default", name: organization },
+    branding: { organization, logoText: "SignalPrism NDR" },
+    classification,
+    generatedBy: state.backend.principal?.email || state.backend.principal?.name || state.backend.principal?.subject || "local analyst"
+  });
+  report.narrativeMode = "evidence";
+  if (narrativeMode === "bedrock") {
+    if (state.backend.ai?.enabled && backendApi && state.backend.online) {
+      els.executiveBriefStatus.textContent = "Generating a bounded Bedrock narrative from cited report facts...";
+      try {
+        const ai = await backendApi.askAi({
+          mode: "summary",
+          question: "Write a concise executive NDR summary using only the supplied report facts. Preserve the [F#] and [M#] citations, distinguish unknown context, and do not introduce new claims.",
+          context: {
+            reportId: report.id,
+            posture: report.posture,
+            metrics: report.metrics,
+            findings: report.findings.slice(0, 5),
+            caveats: report.caveats,
+            deterministicNarrative: report.narrative
+          }
+        });
+        const answer = String(ai.answer || "").trim();
+        if (answer) {
+          report.aiNarrative = /\[(?:F|M)\d+\]/.test(answer) ? answer : `${answer} Evidence anchors: [F1] [M1] [M5].`;
+          report.narrativeMode = "bedrock-assisted";
+        }
+      } catch (error) {
+        if (!settings.silent) showToast(`Bedrock narrative unavailable; evidence-cited summary retained: ${error.message}`, "warn");
+      }
+    } else if (!settings.silent) {
+      showToast("Bedrock is unavailable; the evidence-cited narrative was generated instead.", "warn");
+    }
+  }
+  report.integrity.sha256 = await sha256Text(JSON.stringify({ ...report, integrity: undefined }));
+  await persistEnterpriseArtifact("EXECUTIVE_BRIEF", report.title, report, "active", report.id);
+  saveJson(STORAGE_KEYS.executiveBriefs, [report, ...reports.filter((item) => item.id !== report.id)].slice(0, 25));
+  state.executive.currentReport = report;
+  renderExecutiveBriefOutput(report);
+  if (!settings.silent) showToast("Executive security brief generated with evidence citations.");
+  return report;
+}
+
+function renderExecutiveBriefOutput(report) {
+  if (!report) {
+    els.executiveBriefOutput.innerHTML = "";
+    els.executiveBriefStatus.textContent = "Generate a brief from the current evidence and tenant operations data.";
+    return;
+  }
+  const delta = report.posture?.delta;
+  const deltaLabel = delta === null || delta === undefined ? "No prior score" : `${delta > 0 ? "+" : ""}${delta} vs prior`;
+  els.executiveBriefStatus.textContent = `${report.classification} - ${report.period?.label || "Current evidence"} - generated ${new Date(report.generatedAt).toLocaleString()} - SHA-256 ${String(report.integrity?.sha256 || report.integrity?.contentFingerprint || "pending").slice(0, 16)}`;
+  els.executiveBriefOutput.innerHTML = `<div class="executive-report-heading">
+      <div><p class="panel-kicker">${escapeHtml(report.organization)} - ${escapeHtml(report.classification)}</p><h3>${escapeHtml(report.title)}</h3><p>${escapeHtml(report.period?.label || "Current evidence")} - ${formatNumber(report.evidence?.recordCount || 0)} records - ${formatNumber(report.evidence?.caseCount || 0)} cases</p></div>
+      <div class="executive-posture"><strong>${escapeHtml(String(report.posture?.score ?? 0))}</strong><span>${escapeHtml(report.posture?.label || "Unknown")} risk - ${escapeHtml(deltaLabel)}</span></div>
+    </div>
+    <div class="executive-narrative"><strong>${report.narrativeMode === "bedrock-assisted" ? "Bedrock-assisted narrative" : "Evidence-cited narrative"}</strong><p>${escapeHtml(report.aiNarrative || report.narrative || "")}</p></div>
+    <div class="executive-table-wrap">
+      <table class="executive-table report-metrics-table"><thead><tr><th scope="col">Metric</th><th scope="col">Current</th><th scope="col">Previous</th><th scope="col">Change</th><th scope="col">Interpretation</th></tr></thead>
+      <tbody>${(report.metrics || []).map((metricItem, index) => `<tr><td><strong>[M${index + 1}] ${escapeHtml(metricItem.label)}</strong></td><td><strong>${escapeHtml(executiveMetricValue(metricItem.current, metricItem.unit))}</strong></td><td>${escapeHtml(executiveMetricValue(metricItem.previous, metricItem.unit))}</td><td>${escapeHtml(metricItem.delta === null ? "Unknown" : `${metricItem.delta > 0 ? "+" : ""}${metricItem.delta}${metricItem.unit || ""}`)}</td><td>${escapeHtml(metricItem.interpretation)}</td></tr>`).join("")}</tbody></table>
+    </div>
+    <div class="executive-table-wrap">
+      <table class="executive-table report-findings-table"><thead><tr><th scope="col">Rank</th><th scope="col">Finding</th><th scope="col">Urgency</th><th scope="col">Trend</th><th scope="col">Owner</th><th scope="col">Status</th></tr></thead>
+      <tbody>${(report.findings || []).map((finding) => `<tr><td><strong>[F${finding.rank}]</strong></td><td><strong>${escapeHtml(finding.title)}</strong><span>${escapeHtml(finding.entities?.slice(0, 2).join(", ") || "Unknown entity")}</span></td><td><span class="urgency-score ${escapeHtml(String(finding.urgencyLabel || "low").toLowerCase())}">${finding.urgency}</span></td><td>${escapeHtml(finding.trend)}</td><td>${escapeHtml(finding.owner)}</td><td>${escapeHtml(finding.status)}</td></tr>`).join("") || `<tr><td colspan="6">No ranked findings</td></tr>`}</tbody></table>
+    </div>
+    <div class="executive-decisions"><strong>Decisions and actions</strong><ul>${(report.decisions || []).map((decision) => `<li>${escapeHtml(`${decision.findingRef}: ${decision.text}`)}</li>`).join("") || "<li>No immediate decision recorded.</li>"}</ul></div>
+    ${report.caveats?.length ? `<div class="executive-caveats"><strong>Coverage and caveats</strong><ul>${report.caveats.map((caveat) => `<li>${escapeHtml(caveat)}</li>`).join("")}</ul></div>` : ""}`;
+}
+
+function executiveMetricValue(value, unit = "") {
+  return value === null || value === undefined ? "Unknown" : `${formatNumber(value)}${unit || ""}`;
+}
+
+async function exportExecutiveBrief(format) {
+  if (!hasRole("admin") && !hasRole("analyst")) return setInputMessage("Admin or analyst role is required to export executive reports.");
+  let report = state.executive.currentReport;
+  if (!report) report = await generateExecutiveBrief({ silent: true });
+  if (!report) return;
+  const exportPayload = { product: "SignalPrism NDR", reportType: "executive-brief", format, report };
+  try {
+    if (backendApi && state.backend.online) {
+      const governed = await backendApi.exportInvestigationPackage(exportPayload);
+      if (governed?.pending) {
+        await renderExportApprovals();
+        showToast("Executive report export submitted for approval.", "warn");
+        return;
+      }
+      report = governed.report || report;
+    } else if (enterpriseSettingsValue().governance?.exportApprovalRequired) {
+      throw new Error("The governed backend is required while export approval is enabled.");
+    }
+    downloadExecutiveBriefPayload(report, format);
+    showToast(`Executive ${format.toUpperCase()} exported.`);
+  } catch (error) {
+    setInputMessage(error.message);
+  }
+}
+
+function downloadExecutiveBriefPayload(report, format) {
+  const date = String(report.generatedAt || new Date().toISOString()).slice(0, 10);
+  if (format === "csv") {
+    downloadText(`signalprism-executive-brief-${date}.csv`, executiveReportingApi.executiveReportCsv(report), "text/csv;charset=utf-8");
+    return;
+  }
+  if (format === "pdf") {
+    downloadBlob(`signalprism-executive-brief-${date}.pdf`, new Blob([buildExecutivePdf(report)], { type: "application/pdf" }));
+    return;
+  }
+  downloadText(`signalprism-executive-brief-${date}.json`, JSON.stringify(report, null, 2), "application/json");
+}
+
+function buildExecutivePdf(report) {
+  const lines = [
+    report.logoText || "SignalPrism NDR",
+    report.title || "Executive Security Brief",
+    `${report.organization || "Current tenant"} | ${report.classification || "Confidential"}`,
+    `${report.period?.label || "Current evidence"} | Generated ${report.generatedAt || ""}`,
+    "",
+    `Risk posture: ${report.posture?.label || "Unknown"} (${report.posture?.score ?? 0}/100)`,
+    "",
+    ...(wrapPdfText(report.aiNarrative || report.narrative || "No narrative available.", 92)),
+    "",
+    "EXECUTIVE METRICS",
+    ...(report.metrics || []).flatMap((item, index) => wrapPdfText(`[M${index + 1}] ${item.label}: ${executiveMetricValue(item.current, item.unit)} | Prior ${executiveMetricValue(item.previous, item.unit)} | ${item.interpretation}`, 92)),
+    "",
+    "TOP FINDINGS",
+    ...(report.findings || []).flatMap((item) => wrapPdfText(`[F${item.rank}] ${item.title} | Urgency ${item.urgency}/100 | ${item.owner} | ${item.status} | Last ${item.lastSeen}`, 92)),
+    "",
+    "DECISIONS AND ACTIONS",
+    ...(report.decisions || []).flatMap((item) => wrapPdfText(`${item.findingRef}: ${item.text}`, 92)),
+    "",
+    "COVERAGE AND CAVEATS",
+    ...(report.caveats?.length ? report.caveats.flatMap((item) => wrapPdfText(item, 92)) : ["No material reporting caveat recorded."]),
+    "",
+    `Integrity: ${report.integrity?.sha256 || report.integrity?.contentFingerprint || "Not available"}`
+  ];
+  return createTextPdf(lines);
+}
+
+function createTextPdf(inputLines) {
+  const lines = inputLines.map((line) => String(line || "").normalize("NFKD").replace(/[^\x20-\x7E]/g, "?")).slice(0, 600);
+  const pages = [];
+  for (let index = 0; index < lines.length; index += 48) pages.push(lines.slice(index, index + 48));
+  if (!pages.length) pages.push(["SignalPrism NDR Executive Brief"]);
+  const objects = new Map();
+  const pageIds = pages.map((_, index) => 4 + index * 2);
+  objects.set(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  objects.set(2, `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`);
+  objects.set(3, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  pages.forEach((pageLines, index) => {
+    const pageId = pageIds[index];
+    const streamId = pageId + 1;
+    const content = `BT\n/F1 10 Tf\n48 760 Td\n14 TL\n${pageLines.map((line) => `(${escapePdfText(line)}) Tj\nT*`).join("\n")}\nET`;
+    objects.set(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${streamId} 0 R >>`);
+    objects.set(streamId, `<< /Length ${new TextEncoder().encode(content).length} >>\nstream\n${content}\nendstream`);
+  });
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  const objectCount = 3 + pages.length * 2;
+  for (let id = 1; id <= objectCount; id += 1) {
+    offsets[id] = new TextEncoder().encode(pdf).length;
+    pdf += `${id} 0 obj\n${objects.get(id)}\nendobj\n`;
+  }
+  const xrefOffset = new TextEncoder().encode(pdf).length;
+  pdf += `xref\n0 ${objectCount + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n `).join("\n")}\n`;
+  pdf += `trailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return new TextEncoder().encode(pdf);
+}
+
+function wrapPdfText(text, width) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    if (!line) line = word;
+    else if (`${line} ${word}`.length <= width) line += ` ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+function escapePdfText(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+async function saveReportSchedule(event) {
+  event?.preventDefault?.();
+  if (!hasRole("admin")) return setReportScheduleMessage("Admin role is required to manage report schedules.", "error");
+  try {
+    const schedule = executiveReportingApi.validateReportSchedule({
+      name: els.reportScheduleNameInput.value,
+      frequency: els.reportScheduleFrequencySelect.value,
+      period: els.reportSchedulePeriodSelect.value,
+      format: els.reportScheduleFormatSelect.value,
+      classification: els.reportScheduleClassificationSelect.value,
+      recipients: els.reportScheduleRecipientsInput.value
+    }, loadJson(STORAGE_KEYS.tenantUsers, []));
+    const savedArtifact = await persistEnterpriseArtifact("REPORT_SCHEDULE", schedule.name, schedule, schedule.status, schedule.id);
+    const savedSchedule = { ...schedule, _artifactRevision: savedArtifact.revision, _artifactCreatedAt: savedArtifact.createdAt };
+    const schedules = [savedSchedule, ...loadJson(STORAGE_KEYS.reportSchedules, []).filter((item) => item.id !== schedule.id)].slice(0, 50);
+    saveJson(STORAGE_KEYS.reportSchedules, schedules);
+    els.reportScheduleForm.reset();
+    els.reportScheduleClassificationSelect.value = "Confidential";
+    setReportScheduleMessage("Schedule saved for governed tenant-inbox delivery.", "success");
+    renderReportSchedules();
+    showToast("Executive report schedule saved.");
+  } catch (error) {
+    setReportScheduleMessage(error.message, "error");
+  }
+}
+
+function setReportScheduleMessage(message, tone = "") {
+  els.reportScheduleMessage.textContent = message;
+  els.reportScheduleMessage.className = `form-message ${tone}`.trim();
+}
+
+function renderReportSchedules() {
+  const schedules = loadJson(STORAGE_KEYS.reportSchedules, []);
+  const deliveries = loadJson(STORAGE_KEYS.reportDeliveries, []);
+  if (!schedules.length && !deliveries.length) {
+    els.reportScheduleList.innerHTML = `<div class="empty-state"><strong>No report schedules</strong><span>Tenant administrators can create weekly or monthly executive brief deliveries.</span></div>`;
+    return;
+  }
+  const canAdmin = hasRole("admin");
+  els.reportScheduleList.innerHTML = [
+    ...schedules.map((schedule) => `<div class="schedule-row"><div><strong>${escapeHtml(schedule.name)}</strong><span>${escapeHtml(`${schedule.frequency} - ${schedule.period} - ${schedule.format.toUpperCase()} - ${schedule.status}`)}</span><span>Next ${escapeHtml(schedule.nextRunAt ? new Date(schedule.nextRunAt).toLocaleString() : "not scheduled")} - ${escapeHtml(schedule.recipients.join(", "))}</span></div><div class="schedule-row-actions"><button class="mini-button" type="button" data-run-report-schedule="${escapeHtml(schedule.id)}" ${canAdmin && schedule.status === "active" ? "" : "disabled"}>Run</button><button class="mini-button" type="button" data-pause-report-schedule="${escapeHtml(schedule.id)}" ${canAdmin ? "" : "disabled"}>${schedule.status === "paused" ? "Resume" : "Pause"}</button><button class="mini-button danger" type="button" data-delete-report-schedule="${escapeHtml(schedule.id)}" ${canAdmin ? "" : "disabled"}>Delete</button></div></div>`),
+    ...deliveries.slice(0, 10).map((delivery) => `<div class="schedule-row"><div><strong>${escapeHtml(delivery.scheduleName)} delivery</strong><span>${escapeHtml(`${delivery.format.toUpperCase()} - ${delivery.classification} - delivered ${new Date(delivery.deliveredAt).toLocaleString()}`)}</span><span>${escapeHtml(delivery.recipients.join(", "))}</span></div><div class="schedule-row-actions"><button class="mini-button" type="button" data-download-report-delivery="${escapeHtml(delivery.id)}">Download</button></div></div>`)
+  ].join("");
+  els.reportScheduleList.querySelectorAll("[data-download-report-delivery]").forEach((button) => button.addEventListener("click", () => downloadReportDelivery(button.dataset.downloadReportDelivery)));
+}
+
+async function runReportSchedule(id, automatic = false) {
+  if (!hasRole("admin")) return;
+  const schedules = loadJson(STORAGE_KEYS.reportSchedules, []);
+  const schedule = schedules.find((item) => item.id === id);
+  if (!schedule || schedule.status !== "active") return;
+  try {
+    const report = await generateExecutiveBrief({ period: schedule.period, classification: schedule.classification, narrativeMode: "evidence", silent: true });
+    if (!report) return;
+    const delivery = {
+      id: `report-delivery-${Date.now()}`,
+      scheduleId: schedule.id,
+      scheduleName: schedule.name,
+      report,
+      format: schedule.format,
+      classification: schedule.classification,
+      recipients: schedule.recipients,
+      destination: "tenant-inbox",
+      status: "delivered",
+      deliveredAt: new Date().toISOString()
+    };
+    const updated = executiveReportingApi.advanceReportSchedule(schedule, new Date());
+    saveJson(STORAGE_KEYS.reportDeliveries, [delivery, ...loadJson(STORAGE_KEYS.reportDeliveries, [])].slice(0, 50));
+    const [savedScheduleArtifact] = await Promise.all([
+      persistEnterpriseArtifact("REPORT_SCHEDULE", updated.name, updated, updated.status, updated.id),
+      persistEnterpriseArtifact("REPORT_DELIVERY", `${schedule.name} delivery`, delivery, "delivered", delivery.id)
+    ]);
+    const savedSchedule = { ...updated, _artifactRevision: savedScheduleArtifact.revision, _artifactCreatedAt: savedScheduleArtifact.createdAt };
+    saveJson(STORAGE_KEYS.reportSchedules, schedules.map((item) => item.id === id ? savedSchedule : item));
+    renderReportSchedules();
+    if (!automatic) showToast("Executive report delivered to the tenant inbox.");
+  } catch (error) {
+    if (!automatic) setReportScheduleMessage(error.message, "error");
+  }
+}
+
+async function runDueReportSchedules() {
+  if (state.executive.runningDueSchedules) return;
+  const due = loadJson(STORAGE_KEYS.reportSchedules, []).filter((schedule) => schedule.status === "active" && Date.parse(schedule.nextRunAt || 0) <= Date.now());
+  if (!due.length) return;
+  state.executive.runningDueSchedules = true;
+  try {
+    for (const schedule of due.slice(0, 5)) await runReportSchedule(schedule.id, true);
+  } finally {
+    state.executive.runningDueSchedules = false;
+  }
+}
+
+async function toggleReportSchedule(id) {
+  if (!hasRole("admin")) return;
+  const schedules = loadJson(STORAGE_KEYS.reportSchedules, []);
+  const schedule = schedules.find((item) => item.id === id);
+  if (!schedule) return;
+  const updated = { ...schedule, status: schedule.status === "paused" ? "active" : "paused", updatedAt: new Date().toISOString() };
+  const savedArtifact = await persistEnterpriseArtifact("REPORT_SCHEDULE", updated.name, updated, updated.status, updated.id);
+  const savedSchedule = { ...updated, _artifactRevision: savedArtifact.revision, _artifactCreatedAt: savedArtifact.createdAt };
+  saveJson(STORAGE_KEYS.reportSchedules, schedules.map((item) => item.id === id ? savedSchedule : item));
+  renderReportSchedules();
+}
+
+function deleteReportSchedule(id) {
+  if (!hasRole("admin")) return;
+  const schedule = loadJson(STORAGE_KEYS.reportSchedules, []).find((item) => item.id === id);
+  if (!schedule) return;
+  confirmAction({
+    title: "Delete executive report schedule?",
+    body: `This stops ${schedule.name}. Existing tenant-inbox deliveries remain available for their retention period.`,
+    confirmLabel: "Delete Schedule",
+    onConfirm: async () => {
+      if (backendApi?.deleteEnterpriseArtifact && state.backend.online) await backendApi.deleteEnterpriseArtifact(id);
+      saveJson(STORAGE_KEYS.reportSchedules, loadJson(STORAGE_KEYS.reportSchedules, []).filter((item) => item.id !== id));
+      renderReportSchedules();
+      showToast("Report schedule deleted.");
+    }
+  });
+}
+
+function downloadReportDelivery(id) {
+  const delivery = loadJson(STORAGE_KEYS.reportDeliveries, []).find((item) => item.id === id);
+  if (!delivery) return setInputMessage("Report delivery was not found.");
+  downloadExecutiveBriefPayload(delivery.report, delivery.format);
+}
+
 async function generateEnterpriseReport() {
   const cases = await listCaseRecords().catch(() => []);
   const report = buildEnterpriseReport({
@@ -6279,23 +7211,225 @@ function renderEnterpriseAdminReadiness() {
   ].join("");
 }
 
+function rebuildEventStitching(showFeedback = false) {
+  if (!eventStitchingApi?.buildStitchedIncidents) {
+    loadEventStitchingApi().then(() => rebuildEventStitching(showFeedback)).catch((error) => setInputMessage(`Event stitching could not start: ${error.message}`));
+    return;
+  }
+  const events = state.heatmap.selection && networkHeatmapApi?.recordMatchesHeatmapSelection
+    ? state.stitching.events.filter(eventMatchesHeatmapSelection)
+    : state.stitching.events;
+  const result = eventStitchingApi.buildStitchedIncidents(events, {
+    windowMinutes: Number(els.stitchWindowSelect?.value || 240),
+    minimumLinkConfidence: Number(els.stitchConfidenceSelect?.value || 0.62)
+  });
+  state.stitching.result = result;
+  if (!result.chains.some((chain) => chain.id === state.stitching.selectedChainId)) {
+    state.stitching.selectedChainId = result.chains[0]?.id || "";
+  }
+  renderEventStitching();
+  if (showFeedback) {
+    showToast(result.chainCount
+      ? `${formatNumber(result.chainCount)} incident chain${result.chainCount === 1 ? "" : "s"} rebuilt from ${formatNumber(result.eventCount)} events.`
+      : `No defensible multi-source chain met the selected confidence policy.`, result.chainCount ? "success" : "warn");
+  }
+}
+
+function eventMatchesHeatmapSelection(event) {
+  const timestamp = Date.parse(event.timestamp || event.createdAt || "");
+  return networkHeatmapApi.recordMatchesHeatmapSelection({
+    source: event.sourceIp || event.source || "-",
+    destination: event.destinationIp || event.destination || "-",
+    srcPort: event.sourcePort || event.srcPort || null,
+    dstPort: event.destinationPort || event.dstPort || null,
+    start: Number.isFinite(timestamp) ? timestamp : event.start,
+    accountId: event.accountId || "-",
+    protocol: event.protocol || event.format || "-",
+    evidenceSource: event.evidenceSource || "Unknown source"
+  }, state.heatmap.selection);
+}
+
+function renderEventStitching() {
+  if (!els.stitchMetricGrid) return;
+  const result = state.stitching.result;
+  if (!result) {
+    els.stitchStatus.textContent = state.stitching.events.length ? "Building incident chains" : "No normalized evidence";
+    els.stitchMetricGrid.innerHTML = [
+      metricTemplate("Incident chains", "0", "multi-source"),
+      metricTemplate("Explainable links", "0", "confidence-scored"),
+      metricTemplate("Normalized events", formatNumber(state.stitching.events.length), "waiting for correlation"),
+      metricTemplate("Conflicts", "0", "unsafe joins blocked")
+    ].join("");
+    els.stitchChainList.innerHTML = eventStitchingEmptyState("No incident chains", "Upload at least two related evidence sources to build an ordered investigation chain.");
+    els.stitchDetail.innerHTML = eventStitchingEmptyState("Select a chain", "Chain evidence, source provenance, and link reasoning will appear here.");
+    els.stitchGapList.innerHTML = eventStitchingEmptyState("No coverage assessment", "Telemetry gaps are calculated after evidence normalization.");
+    els.exportStitchingButton.disabled = true;
+    return;
+  }
+
+  els.stitchStatus.textContent = `${formatNumber(result.chainCount)} chains, ${formatNumber(result.linkCount)} links, ${formatNumber(result.sourceCount)} sources`;
+  els.stitchMetricGrid.innerHTML = [
+    metricTemplate("Incident chains", formatNumber(result.chainCount), `${formatNumber(result.linkedEventCount)} linked events`),
+    metricTemplate("Explainable links", formatNumber(result.linkCount), `${Math.round((result.chains[0]?.confidence || 0) * 100)}% top confidence`),
+    metricTemplate("Normalized events", formatNumber(result.eventCount), `${formatNumber(result.formatCount)} detected formats`),
+    metricTemplate("Conflicts", formatNumber(result.conflicts.length), `${formatNumber(result.suppressedEntityCount)} shared entities suppressed`)
+  ].join("");
+  els.exportStitchingButton.disabled = !result.chainCount;
+
+  els.stitchChainList.innerHTML = result.chains.length
+    ? result.chains.map((chain) => `<button class="stitch-chain-row${chain.id === state.stitching.selectedChainId ? " active" : ""}" type="button" data-stitch-chain="${escapeHtml(chain.id)}" aria-pressed="${chain.id === state.stitching.selectedChainId}">
+        <span class="stitch-chain-heading"><strong>${escapeHtml(chain.title)}</strong><span class="tag ${tagClass(chain.severity)}">${escapeHtml(chain.severity.toUpperCase())}</span></span>
+        <span>${escapeHtml(chain.stages.join(" -> "))}</span>
+        <span>${escapeHtml(String(Math.round(chain.confidence * 100)))}% confidence, ${escapeHtml(formatNumber(chain.events.length))} events, ${escapeHtml(formatNumber(chain.evidenceSources.length))} sources</span>
+      </button>`).join("")
+    : eventStitchingEmptyState("No defensible chain found", `${formatNumber(result.eventCount)} events were normalized, but no risk-bearing sequence crossed two independent evidence sources at the selected confidence threshold.`);
+
+  const selected = result.chains.find((chain) => chain.id === state.stitching.selectedChainId) || result.chains[0];
+  renderStitchedChainDetail(selected);
+  renderStitchingGaps(result, selected);
+}
+
+function renderStitchedChainDetail(chain) {
+  if (!chain) {
+    els.stitchDetail.innerHTML = eventStitchingEmptyState("No chain selected", "Adjust the time window or confidence policy when related events are expected but remain unlinked.");
+    return;
+  }
+  const incomingLinks = new Map(chain.links.map((link) => [link.toEventId, link]));
+  els.stitchDetail.innerHTML = `<div class="stitch-detail-header">
+      <div><p class="panel-kicker">Selected incident</p><h3>${escapeHtml(chain.title)}</h3></div>
+      <div class="stitch-score ${escapeHtml(chain.severity)}"><span>Urgency</span><strong>${escapeHtml(String(chain.score))}</strong></div>
+    </div>
+    <p class="stitch-narrative">${escapeHtml(chain.narrative)}</p>
+    <div class="entity-meta">
+      ${chain.evidenceSources.map((source) => `<span class="tag">${escapeHtml(source)}</span>`).join("")}
+      <span class="tag">${escapeHtml(String(Math.round(chain.confidence * 100)))}% confidence</span>
+      <span class="tag">${escapeHtml(formatDate(Date.parse(chain.firstSeen)))} to ${escapeHtml(formatDate(Date.parse(chain.lastSeen)))}</span>
+    </div>
+    <ol class="stitch-timeline">
+      ${chain.events.map((event) => {
+        const link = incomingLinks.get(event.id);
+        const endpointText = [event.sourceIp, event.destinationIp].filter(Boolean).join(" -> ");
+        return `<li>
+          ${link ? `<div class="stitch-link-reason"><strong>${escapeHtml(link.relationship.replace(/-/g, " "))} (${escapeHtml(String(Math.round(link.confidence * 100)))}%)</strong><span>${escapeHtml(link.reasons.join(". "))}</span></div>` : ""}
+          <div class="stitch-event-heading"><span class="stitch-stage">${escapeHtml(stitchEventStage(chain, event))}</span><time datetime="${escapeHtml(event.timestamp)}">${escapeHtml(formatDate(Date.parse(event.timestamp)))}</time></div>
+          <strong>${escapeHtml(event.summary || `${event.format} event`)}</strong>
+          <span>${escapeHtml(event.evidenceSource)} - ${escapeHtml(event.format)}${endpointText ? ` - ${escapeHtml(endpointText)}` : ""}</span>
+          <div class="entity-meta">${[event.identity, event.resource, event.interfaceId, event.communityId].filter(Boolean).slice(0, 4).map((entity) => `<span class="tag mono">${escapeHtml(entity)}</span>`).join("")}</div>
+        </li>`;
+      }).join("")}
+    </ol>`;
+}
+
+function stitchEventStage(chain, event) {
+  if (event.stage) return event.stage;
+  if (event.category === "authentication") return "Credential Access";
+  if (event.action && ["AttachGroupPolicy", "AttachRolePolicy", "AttachUserPolicy", "CreateAccessKey", "PassRole", "PutRolePolicy", "PutUserPolicy"].includes(event.action)) return "Privilege Escalation";
+  if (Number(event.bytes) >= 10 * 1024 * 1024 || event.category === "dns" && String(event.query || "").length >= 60) return "Exfiltration";
+  if (["threat-finding", "ids-alert", "dns"].includes(event.category)) return "Command and Control";
+  return chain.stages[0] || "Observed Activity";
+}
+
+function renderStitchingGaps(result, chain) {
+  const items = [
+    ...(result.gaps || []).map((gap) => ({ title: gap.type.replace(/-/g, " "), detail: gap.detail, tone: gap.severity })),
+    ...(result.conflicts || []).map((conflict) => ({ title: `Blocked: ${conflict.type.replace(/-/g, " ")}`, detail: conflict.detail, tone: "medium" })),
+    ...((chain?.gaps || []).map((detail) => ({ title: "Chain coverage gap", detail, tone: "low" })))
+  ];
+  els.stitchGapList.innerHTML = items.length
+    ? items.slice(0, 20).map((item) => `<div class="issue-item"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail)}</span></div>`).join("")
+    : `<div class="issue-item"><strong>No material stitching gaps</strong><span>The selected chain includes identity, DNS, and independent detection evidence with no blocked ambiguous joins.</span></div>`;
+}
+
+function eventStitchingEmptyState(title, copy) {
+  return `<div class="empty-state"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(copy)}</span></div>`;
+}
+
+async function exportStitchedIncidents() {
+  const result = state.stitching.result;
+  if (!result?.chainCount) return setInputMessage("Build at least one stitched incident chain before exporting.");
+  if (state.backend.online && !hasRole("admin") && !hasRole("analyst")) return setInputMessage("An analyst or admin role is required to export stitched evidence.");
+  if (enterpriseSettingsValue().governance?.exportApprovalRequired !== false) {
+    await exportInvestigationPackage();
+    return;
+  }
+  const exportResult = {
+    ...result,
+    chains: result.chains.map((chain) => ({
+      ...chain,
+      events: chain.events.map(({ raw, ...event }) => event)
+    }))
+  };
+  downloadText(`signalprism-stitched-incidents-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(exportResult, null, 2), "application/json");
+  showToast("Stitched incidents exported without raw payload bodies.");
+}
+
 function renderTopology() {
-  if (!topologyApi?.buildTopology) return;
+  if (!topologyApi?.buildTopology || !networkHeatmapApi) return;
+  syncHeatmapControls();
   if (!state.records.length) {
     els.topologyCanvas.innerHTML = emptyState();
     if (els.replayEventList) els.replayEventList.innerHTML = emptyState();
+    state.heatmap.model = null;
+    els.exportHeatmapButton.disabled = true;
     return;
   }
   const replay = buildTopologyReplaySnapshot(state.records, Number(els.replayRangeInput.value || 100));
-  const topology = topologyApi.buildTopology(state.records, replay.cutoff);
-  els.topologyCanvas.innerHTML = topologyApi.renderTopologySvg(topology);
+  const selectedRecords = replay.includedRecords.filter((record) => !state.heatmap.selection || networkHeatmapApi.recordMatchesHeatmapSelection(record, state.heatmap.selection));
+  const evidenceSets = heatmapEvidenceSets();
+  const options = {
+    groupBy: state.heatmap.groupBy,
+    metric: state.heatmap.metric,
+    scale: state.heatmap.scale,
+    evidenceFilter: state.heatmap.evidenceFilter,
+    zoom: state.heatmap.zoom,
+    panRatio: state.heatmap.panRatio,
+    detectionKeys: evidenceSets.detectionKeys,
+    stitchedKeys: evidenceSets.stitchedKeys,
+    enrichment: state.enrichment,
+    allowDemoCoordinates: true
+  };
+
+  els.topologyCanvas.className = `topology-canvas topology-mode-${state.heatmap.mode} heatmap-zoom-${heatmapZoomClass()}`;
+  if (state.heatmap.mode === "activity") {
+    state.heatmap.model = networkHeatmapApi.buildActivityHeatmap(replay.includedRecords, options);
+    els.topologyCanvas.innerHTML = networkHeatmapApi.renderActivityHeatmap(state.heatmap.model, state.heatmap.selection);
+    els.topologyViewHeading.textContent = "Time activity heatmap";
+    els.heatmapStatusLabel.textContent = activityHeatmapStatus(state.heatmap.model);
+  } else if (state.heatmap.mode === "matrix") {
+    state.heatmap.model = networkHeatmapApi.buildCommunicationMatrix(replay.includedRecords, options);
+    els.topologyCanvas.innerHTML = networkHeatmapApi.renderCommunicationMatrix(state.heatmap.model, state.heatmap.selection);
+    els.topologyViewHeading.textContent = "Communication matrix";
+    els.heatmapStatusLabel.textContent = matrixHeatmapStatus(state.heatmap.model);
+  } else if (state.heatmap.mode === "geographic") {
+    state.heatmap.model = networkHeatmapApi.buildGeographicHeatmap(replay.includedRecords, options);
+    els.topologyCanvas.innerHTML = networkHeatmapApi.renderGeographicHeatmap(state.heatmap.model, {
+      zoom: state.heatmap.zoom,
+      panX: state.heatmap.panX,
+      panY: state.heatmap.panY,
+      selection: state.heatmap.selection
+    });
+    els.topologyViewHeading.textContent = "Geographic network activity";
+    els.heatmapStatusLabel.textContent = geographicHeatmapStatus(state.heatmap.model);
+  } else {
+    const topology = topologyApi.buildTopology(selectedRecords);
+    state.heatmap.model = { kind: "graph", ...topology, inputRecordCount: selectedRecords.length };
+    els.topologyCanvas.innerHTML = topologyApi.renderTopologySvg(topology);
+    els.topologyViewHeading.textContent = "Entity-to-entity paths";
+    els.heatmapStatusLabel.textContent = `${formatNumber(topology.nodes.length)} entities, ${formatNumber(topology.edges.length)} observed paths`;
+  }
+  els.exportHeatmapButton.disabled = state.heatmap.mode === "graph" || !state.heatmap.model;
   els.replayTimeLabel.textContent = replay.percent >= 100 ? "All evidence" : `Replay through ${formatDate(replay.cutoff)}`;
   if (els.replayEventCountLabel) {
-    els.replayEventCountLabel.textContent = `${formatNumber(replay.includedRecords.length)} of ${formatNumber(state.records.length)} records`;
+    const selectedCopy = state.heatmap.selection ? `, ${formatNumber(selectedRecords.length)} selected` : "";
+    els.replayEventCountLabel.textContent = `${formatNumber(replay.includedRecords.length)} of ${formatNumber(state.records.length)} records${selectedCopy}`;
   }
   if (els.replayEventList) {
-    els.replayEventList.innerHTML = replay.recentRecords.length
-      ? replay.recentRecords
+    const recentRecords = selectedRecords
+      .filter((record) => Number.isFinite(record.start))
+      .sort((a, b) => b.start - a.start)
+      .slice(0, 8);
+    els.replayEventList.innerHTML = recentRecords.length
+      ? recentRecords
           .map(
             (record) => `<div class="issue-item">
               <strong>${escapeHtml(formatDate(record.start))} ${escapeHtml(record.action)}</strong>
@@ -6306,6 +7440,352 @@ function renderTopology() {
           .join("")
       : emptyState();
   }
+  bindHeatmapCellInteractions();
+  renderHeatmapSelectionContext();
+}
+
+function bindHeatmapCellInteractions() {
+  els.topologyCanvas.querySelectorAll("[data-heat-kind]").forEach((target) => {
+    target.addEventListener("click", selectHeatmapCell);
+    target.addEventListener("dblclick", openHeatmapEvidence);
+  });
+}
+
+function setTopologyMode(mode) {
+  if (!networkHeatmapApi?.HEATMAP_MODES?.includes(mode)) return;
+  state.heatmap.mode = mode;
+  if (mode === "matrix" && !["entity", "subnet", "account", "source"].includes(state.heatmap.groupBy)) {
+    state.heatmap.groupBy = "entity";
+  }
+  state.heatmap.zoom = 1;
+  state.heatmap.panRatio = 0;
+  state.heatmap.panX = 0;
+  state.heatmap.panY = 0;
+  renderTopology();
+}
+
+function syncHeatmapControls() {
+  const isGraph = state.heatmap.mode === "graph";
+  els.heatmapToolbar.hidden = isGraph;
+  els.heatmapContextBar.hidden = isGraph;
+  els.topologyModeControl.querySelectorAll("[data-topology-mode]").forEach((button) => {
+    const active = button.dataset.topologyMode === state.heatmap.mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  const groupOptions = [...els.heatmapGroupSelect.options];
+  groupOptions.forEach((option) => {
+    option.disabled = state.heatmap.mode === "matrix" && ["port", "protocol"].includes(option.value);
+  });
+  els.heatmapGroupSelect.value = state.heatmap.groupBy;
+  els.heatmapGroupSelect.disabled = state.heatmap.mode === "geographic";
+  els.heatmapMetricSelect.value = state.heatmap.metric;
+  els.heatmapScaleSelect.value = state.heatmap.scale;
+  els.heatmapEvidenceFilter.value = state.heatmap.evidenceFilter;
+  els.heatmapPanUpButton.disabled = !["matrix", "geographic"].includes(state.heatmap.mode);
+  els.heatmapPanDownButton.disabled = !["matrix", "geographic"].includes(state.heatmap.mode);
+}
+
+function updateHeatmapOptions() {
+  state.heatmap.groupBy = els.heatmapGroupSelect.value;
+  state.heatmap.metric = els.heatmapMetricSelect.value;
+  state.heatmap.scale = els.heatmapScaleSelect.value;
+  state.heatmap.evidenceFilter = els.heatmapEvidenceFilter.value;
+  state.heatmap.zoom = 1;
+  state.heatmap.panRatio = 0;
+  state.heatmap.panX = 0;
+  state.heatmap.panY = 0;
+  if (state.heatmap.selection && state.heatmap.selection.groupBy && state.heatmap.selection.groupBy !== state.heatmap.groupBy) clearHeatmapSelection(false);
+  renderTopology();
+}
+
+function heatmapEvidenceSets() {
+  const detectionKeys = new Set();
+  const stitchedKeys = new Set();
+  (state.analysis?.detections || []).forEach((detection) => {
+    (detection.records || []).forEach((record) => detectionKeys.add(networkHeatmapApi.recordEvidenceKey(record)));
+  });
+  (state.stitching.result?.chains || []).forEach((chain) => {
+    (chain.events || []).forEach((event) => stitchedKeys.add(networkHeatmapApi.eventEvidenceKey(event)));
+  });
+  return { detectionKeys, stitchedKeys };
+}
+
+function activityHeatmapStatus(model) {
+  const omitted = model.omittedRowCount ? `, ${formatNumber(model.omittedRowCount)} lower-volume groups omitted` : "";
+  return `${formatNumber(model.visibleRecordCount)} visible flows, ${formatNumber(model.rows.length)} groups${omitted}`;
+}
+
+function matrixHeatmapStatus(model) {
+  const omitted = model.omittedGroupCount ? `, ${formatNumber(model.omittedGroupCount)} groups omitted` : "";
+  return `${formatNumber(model.visibleRecordCount)} visible flows, ${formatNumber(model.groups.length)} endpoint groups${omitted}`;
+}
+
+function geographicHeatmapStatus(model) {
+  const approximate = model.approximateEndpointCount ? `, ${formatNumber(model.approximateEndpointCount)} approximate locations` : "";
+  return `${formatNumber(model.mappedEndpointCount || model.points.length)} mapped endpoints in ${formatNumber(model.points.length)} locations, ${formatNumber(model.unresolvedEndpointCount)} unresolved observations${approximate}`;
+}
+
+function heatmapZoomClass() {
+  if (state.heatmap.zoom >= 3) return 4;
+  if (state.heatmap.zoom >= 2) return 3;
+  if (state.heatmap.zoom >= 1.4) return 2;
+  return 1;
+}
+
+function zoomHeatmap(direction) {
+  if (state.heatmap.mode === "graph") return;
+  const maximum = state.heatmap.mode === "activity" ? 8 : 4;
+  const factor = direction > 0 ? 1.5 : 1 / 1.5;
+  state.heatmap.zoom = Math.max(1, Math.min(maximum, Number((state.heatmap.zoom * factor).toFixed(2))));
+  renderTopology();
+}
+
+function panHeatmap(horizontal, vertical) {
+  if (state.heatmap.mode === "activity") {
+    state.heatmap.panRatio = Math.max(0, Math.min(1, state.heatmap.panRatio + horizontal * 0.14));
+    renderTopology();
+    return;
+  }
+  if (state.heatmap.mode === "matrix") {
+    els.topologyCanvas.scrollBy({ left: horizontal * 180, top: vertical * 180, behavior: "smooth" });
+    return;
+  }
+  if (state.heatmap.mode === "geographic") {
+    state.heatmap.panX = Math.max(-1, Math.min(1, state.heatmap.panX + horizontal * 0.16));
+    state.heatmap.panY = Math.max(-1, Math.min(1, state.heatmap.panY + vertical * 0.16));
+    renderTopology();
+  }
+}
+
+function resetHeatmapView() {
+  state.heatmap.zoom = 1;
+  state.heatmap.panRatio = 0;
+  state.heatmap.panX = 0;
+  state.heatmap.panY = 0;
+  els.topologyCanvas.scrollTo({ left: 0, top: 0 });
+  renderTopology();
+}
+
+function selectHeatmapCell(event) {
+  if (Date.now() < (state.heatmap.suppressClickUntil || 0)) return;
+  const target = event.currentTarget?.matches?.("[data-heat-kind]") ? event.currentTarget : event.target.closest("[data-heat-kind]");
+  if (!target) return;
+  event.stopPropagation();
+  commitHeatmapSelection(selectionFromHeatTarget(target, event.shiftKey));
+}
+
+function selectionFromHeatTarget(target, extend = false) {
+  if (target.dataset.heatKind === "activity") {
+    const start = Number(target.dataset.heatStart);
+    const end = Number(target.dataset.heatEnd);
+    if (extend && state.heatmap.selection?.type === "activity" && state.heatmap.selection.rowKey === target.dataset.heatRow) {
+      return { ...state.heatmap.selection, start: Math.min(state.heatmap.selection.start, start), end: Math.max(state.heatmap.selection.end, end) };
+    }
+    return { type: "activity", rowKey: target.dataset.heatRow, groupBy: state.heatmap.groupBy, start, end };
+  }
+  if (target.dataset.heatKind === "matrix") {
+    return { type: "matrix", sourceKey: target.dataset.heatSource, destinationKey: target.dataset.heatDestination, groupBy: ["entity", "subnet", "account", "source"].includes(state.heatmap.groupBy) ? state.heatmap.groupBy : "entity" };
+  }
+  if (target.dataset.heatKind === "geographic") {
+    const ips = String(target.dataset.heatIps || target.dataset.heatIp || "").split(",").filter(Boolean);
+    return { type: "geographic", ip: ips[0] || target.dataset.heatIp, ips };
+  }
+  return null;
+}
+
+function commitHeatmapSelection(selection) {
+  if (!selection) return;
+  state.heatmap.selection = selection;
+  applyFilters();
+  renderFindings(findingsForHeatmapSelection(state.analysis?.detections || []));
+  rebuildEventStitching(false);
+  renderTopology();
+  showToast(`${formatNumber(state.filtered.length)} evidence record${state.filtered.length === 1 ? "" : "s"} selected.`);
+}
+
+function clearHeatmapSelection(render = true) {
+  state.heatmap.selection = null;
+  state.heatmap.drag = null;
+  applyFilters();
+  renderFindings(state.analysis?.detections || []);
+  rebuildEventStitching(false);
+  if (render) renderTopology();
+}
+
+function renderHeatmapSelectionContext() {
+  const selection = state.heatmap.selection;
+  els.clearHeatmapSelectionButton.disabled = !selection;
+  if (!selection) {
+    els.heatmapSelectionLabel.textContent = state.heatmap.mode === "activity" ? "Click a cell or Shift+drag across a row to select evidence" : "Select a cell or endpoint to filter linked evidence";
+    return;
+  }
+  if (selection.type === "activity") {
+    els.heatmapSelectionLabel.textContent = `${selection.rowKey}, ${formatDate(selection.start)} through ${formatDate(selection.end)} - ${formatNumber(state.filtered.length)} records`;
+  } else if (selection.type === "matrix") {
+    els.heatmapSelectionLabel.textContent = `${selection.sourceKey} to ${selection.destinationKey} - ${formatNumber(state.filtered.length)} records`;
+  } else {
+    const endpoints = selection.ips?.length > 1 ? `${formatNumber(selection.ips.length)} endpoints` : selection.ip;
+    els.heatmapSelectionLabel.textContent = `${endpoints} - ${formatNumber(state.filtered.length)} records`;
+  }
+}
+
+function openHeatmapEvidence(event) {
+  const target = event.currentTarget?.matches?.("[data-heat-kind]") ? event.currentTarget : event.target.closest("[data-heat-kind]");
+  if (!target) return;
+  event.stopPropagation();
+  commitHeatmapSelection(selectionFromHeatTarget(target, event.shiftKey));
+  activateTab("records");
+}
+
+function handleHeatmapWheel(event) {
+  if (state.heatmap.mode === "graph") return;
+  if (!event.ctrlKey && Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+  event.preventDefault();
+  zoomHeatmap(event.deltaY < 0 ? 1 : -1);
+}
+
+function startHeatmapDrag(event) {
+  if (state.heatmap.mode === "graph" || event.button !== 0) return;
+  const cell = event.target.closest('[data-heat-kind="activity"]');
+  if (cell) {
+    if (!event.shiftKey) return;
+    state.heatmap.drag = {
+      type: "brush",
+      pointerId: event.pointerId,
+      rowKey: cell.dataset.heatRow,
+      start: Number(cell.dataset.heatStart),
+      end: Number(cell.dataset.heatEnd),
+      currentStart: Number(cell.dataset.heatStart),
+      currentEnd: Number(cell.dataset.heatEnd),
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false
+    };
+    return;
+  }
+  if (event.target.closest("[data-heat-kind]")) return;
+  state.heatmap.drag = {
+    type: "pan",
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    scrollLeft: els.topologyCanvas.scrollLeft,
+    scrollTop: els.topologyCanvas.scrollTop,
+    panX: state.heatmap.panX,
+    panY: state.heatmap.panY
+  };
+  els.topologyCanvas.setPointerCapture?.(event.pointerId);
+  els.topologyCanvas.classList.add("is-panning");
+}
+
+function moveHeatmapDrag(event) {
+  const drag = state.heatmap.drag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (drag.type === "brush") {
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-heat-kind="activity"]');
+    if (target?.dataset.heatRow !== drag.rowKey) return;
+    drag.moved = drag.moved || target.dataset.heatStart !== String(drag.start) || Math.abs(event.clientX - drag.startX) > 4 || Math.abs(event.clientY - drag.startY) > 4;
+    drag.currentStart = Number(target.dataset.heatStart);
+    drag.currentEnd = Number(target.dataset.heatEnd);
+    if (drag.moved) updateBrushPreview();
+    return;
+  }
+  const deltaX = event.clientX - drag.startX;
+  const deltaY = event.clientY - drag.startY;
+  if (state.heatmap.mode === "matrix") {
+    els.topologyCanvas.scrollLeft = drag.scrollLeft - deltaX;
+    els.topologyCanvas.scrollTop = drag.scrollTop - deltaY;
+  }
+}
+
+function endHeatmapDrag(event) {
+  const drag = state.heatmap.drag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  state.heatmap.drag = null;
+  els.topologyCanvas.classList.remove("is-panning");
+  if (drag.type === "brush") {
+    if (!drag.moved) return;
+    state.heatmap.suppressClickUntil = Date.now() + 250;
+    commitHeatmapSelection({
+      type: "activity",
+      rowKey: drag.rowKey,
+      groupBy: state.heatmap.groupBy,
+      start: Math.min(drag.start, drag.currentStart),
+      end: Math.max(drag.end, drag.currentEnd)
+    });
+    return;
+  }
+  if (state.heatmap.mode === "geographic") {
+    state.heatmap.panX = Math.max(-1, Math.min(1, drag.panX - (event.clientX - drag.startX) / 450));
+    state.heatmap.panY = Math.max(-1, Math.min(1, drag.panY - (event.clientY - drag.startY) / 260));
+    renderTopology();
+  }
+}
+
+function updateBrushPreview() {
+  const drag = state.heatmap.drag;
+  if (!drag || drag.type !== "brush") return;
+  const start = Math.min(drag.start, drag.currentStart);
+  const end = Math.max(drag.end, drag.currentEnd);
+  els.topologyCanvas.querySelectorAll('[data-heat-kind="activity"]').forEach((cell) => {
+    const inRange = cell.dataset.heatRow === drag.rowKey && Number(cell.dataset.heatStart) <= end && Number(cell.dataset.heatEnd) >= start;
+    cell.classList.toggle("brush-preview", inRange);
+  });
+}
+
+function handleHeatmapKeydown(event) {
+  const target = event.target.closest?.("[data-heat-kind]");
+  if (target && ["Enter", " "].includes(event.key)) {
+    event.preventDefault();
+    commitHeatmapSelection(selectionFromHeatTarget(target, event.shiftKey));
+    return;
+  }
+  if (event.key === "Escape" && state.heatmap.selection) clearHeatmapSelection();
+}
+
+async function exportHeatmapView() {
+  if (!state.heatmap.model || state.heatmap.mode === "graph") return setInputMessage("Open a heatmap view before exporting it.");
+  if (state.backend.online && !hasRole("admin") && !hasRole("analyst")) return setInputMessage("An analyst or admin role is required to export heatmap evidence.");
+  if (enterpriseSettingsValue().governance?.exportApprovalRequired !== false) {
+    await exportInvestigationPackage();
+    return;
+  }
+  const payload = buildHeatmapExportModel();
+  downloadText(`signalprism-${state.heatmap.mode}-heatmap-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(payload, null, 2), "application/json");
+  showToast("Heatmap view and selected evidence exported.");
+}
+
+function buildHeatmapExportModel() {
+  const model = state.heatmap.model ? JSON.parse(JSON.stringify(state.heatmap.model)) : null;
+  if (model?.cells) model.cells = model.cells.map(({ recordIndexes, ...cell }) => cell);
+  if (model?.points) model.points = model.points.map(({ recordIndexes, ...point }) => point);
+  if (model?.edges) model.edges = model.edges.map(({ recordIndexes, ...edge }) => edge);
+  return {
+    product: "SignalPrism NDR",
+    exportedAt: new Date().toISOString(),
+    mode: state.heatmap.mode,
+    options: {
+      groupBy: state.heatmap.groupBy,
+      metric: state.heatmap.metric,
+      scale: state.heatmap.scale,
+      evidenceFilter: state.heatmap.evidenceFilter,
+      replayPercent: Number(els.replayRangeInput.value || 100)
+    },
+    selection: state.heatmap.selection,
+    summary: model,
+    evidence: state.filtered.slice(0, 1000).map((record) => ({
+      evidenceSource: record.evidenceSource,
+      source: record.source,
+      destination: record.destination,
+      srcPort: record.srcPort,
+      dstPort: record.dstPort,
+      protocol: record.protocol,
+      action: record.action,
+      bytes: record.bytes,
+      start: record.start
+    }))
+  };
 }
 
 function buildTopologyReplaySnapshot(records, percent = 100) {
@@ -6352,12 +7832,15 @@ function stepTopologyReplay(delta) {
 
 function updateStatus() {
   const total = state.records.length;
-  if (!total) {
+  const eventCount = state.stitching.events.length;
+  if (!total && !eventCount) {
     setStatus(state.errors.length ? "No records parsed" : "No log loaded", "warn");
     return;
   }
   const skipped = state.errors.length ? `, ${state.errors.length} skipped` : "";
-  setStatus(`${formatNumber(total)} records${skipped}`, "ready");
+  const sourceCount = state.evidenceSources.filter((source) => source.records > 0 || source.events > 0).length;
+  const sources = sourceCount ? ` from ${formatNumber(sourceCount)} source${sourceCount === 1 ? "" : "s"}` : "";
+  setStatus(`${formatNumber(total)} flows, ${formatNumber(eventCount)} normalized events${sources}${skipped}`, "ready");
 }
 
 function setStatus(text, className) {
@@ -6379,9 +7862,12 @@ async function exportInvestigationPackage() {
     filtered: state.filtered,
     workspace,
     source: state.fileName,
+    evidenceSources: state.evidenceSources,
     sources: loadJson(STORAGE_KEYS.sources, []),
     hunts: loadJson(STORAGE_KEYS.hunts, []),
     cases,
+    stitchedIncidents: state.stitching.result,
+    heatmapView: state.heatmap.mode === "graph" ? null : buildHeatmapExportModel(),
     analystSummary: els.analystSummary.textContent.trim(),
     aiAnswer: els.aiAnswerPanel.textContent.trim()
   });
@@ -6409,12 +7895,13 @@ async function exportInvestigationPackage() {
   showToast("Investigation package exported.");
 }
 
-function buildInvestigationPackageModel({ analysis, records = [], filtered = [], workspace = null, source = "", sources = [], hunts = [], cases = [], analystSummary = "", aiAnswer = "" }) {
+function buildInvestigationPackageModel({ analysis, records = [], filtered = [], workspace = null, source = "", evidenceSources = [], sources = [], hunts = [], cases = [], stitchedIncidents = null, heatmapView = null, analystSummary = "", aiAnswer = "" }) {
   return {
     product: "SignalPrism NDR",
     exportedAt: new Date().toISOString(),
     workspace: workspace ? packageWorkspace(workspace) : null,
     source,
+    evidenceSources,
     summary: {
       records: records.length,
       filteredRecords: filtered.length,
@@ -6424,7 +7911,9 @@ function buildInvestigationPackageModel({ analysis, records = [], filtered = [],
       entities: analysis?.entityRisk?.length || 0,
       bytes: analysis?.totals?.bytes || 0,
       timeRange: analysis?.timeRange || null,
-      ruleProfile: analysis?.ruleProfile || "balanced"
+      ruleProfile: analysis?.ruleProfile || "balanced",
+      stitchedChains: stitchedIncidents?.chainCount || 0,
+      stitchedLinks: stitchedIncidents?.linkCount || 0
     },
     detections: (analysis?.detections || []).map(packageDetection),
     observations: (analysis?.observations || []).map(packageDetection),
@@ -6436,9 +7925,12 @@ function buildInvestigationPackageModel({ analysis, records = [], filtered = [],
     sources,
     hunts,
     cases,
+    stitchedIncidents: stitchedIncidents ? packageStitchedIncidents(stitchedIncidents) : null,
+    heatmapView,
     analystSummary,
     aiAnswer,
     records: filtered.slice(0, 500).map((record) => ({
+      evidenceSource: record.evidenceSource,
       source: record.source,
       destination: record.destination,
       srcPort: record.srcPort,
@@ -6451,6 +7943,29 @@ function buildInvestigationPackageModel({ analysis, records = [], filtered = [],
       end: record.end,
       interfaceId: record.interfaceId,
       logStatus: record.logStatus
+    }))
+  };
+}
+
+function packageStitchedIncidents(result) {
+  return {
+    generatedAt: result.generatedAt,
+    options: result.options,
+    eventCount: result.eventCount,
+    sourceCount: result.sourceCount,
+    formatCount: result.formatCount,
+    sources: result.sources,
+    formats: result.formats,
+    linkCount: result.linkCount,
+    chainCount: result.chainCount,
+    linkedEventCount: result.linkedEventCount,
+    unlinkedEventCount: result.unlinkedEventCount,
+    conflicts: (result.conflicts || []).slice(0, 100),
+    gaps: (result.gaps || []).slice(0, 100),
+    chains: (result.chains || []).slice(0, 50).map((chain) => ({
+      ...chain,
+      events: (chain.events || []).slice(0, 200).map(({ raw, ...event }) => event),
+      links: (chain.links || []).slice(0, 500)
     }))
   };
 }
@@ -6468,6 +7983,7 @@ function packageDetection(detection) {
     response: detection.response,
     tags: detection.tags,
     evidence: (detection.records || []).slice(0, 20).map((record) => ({
+      evidenceSource: record.evidenceSource,
       source: record.source,
       destination: record.destination,
       srcPort: record.srcPort,
@@ -6491,11 +8007,12 @@ function exportFilteredCsv() {
     setInputMessage("There are no filtered records to export.");
     return;
   }
-  const headers = ["time", "action", "source", "srcport", "destination", "dstport", "protocol", "packets", "bytes", "logStatus", "interfaceId"];
+  const headers = ["evidenceSource", "time", "action", "source", "srcport", "destination", "dstport", "protocol", "packets", "bytes", "logStatus", "interfaceId"];
   const lines = [
     headers.join(","),
     ...state.filtered.map((record) =>
       [
+        record.evidenceSource || "",
         formatDate(record.start),
         record.action,
         record.source,
@@ -6699,12 +8216,16 @@ function copyAnalystSummary() {
 
 function downloadText(fileName, text, type) {
   const blob = new Blob([text], { type });
+  downloadBlob(fileName, blob);
+}
+
+function downloadBlob(fileName, blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function escapeCef(value) {
@@ -6848,6 +8369,7 @@ if (typeof module !== "undefined") {
     buildPlaybookSteps,
     buildReplayTimeline,
     buildSourceHealth,
+    mergeParsedEvidence,
     csvValue,
     parseThreatIntel,
     scoreDetectionRuleQuality,

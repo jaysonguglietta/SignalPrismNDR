@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>SignalPrism NDR</title>
     <link rel="icon" href="favicon.svg?v=0.3.0" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=0.3.0">
+    <link rel="stylesheet" href="styles.css?v=0.4.0">
   </head>
   <body>
     <main class="app-shell">
@@ -38,11 +38,12 @@
         <aside class="ingest-panel" aria-label="Log input and filters">
           <div class="panel-section">
             <label class="drop-zone" id="dropZone">
-              <input id="fileInput" type="file" accept=".log,.txt,.csv,.gz,.json,.jsonl,text/plain,text/csv,application/json">
+              <input id="fileInput" type="file" multiple accept=".log,.txt,.csv,.gz,.json,.jsonl,text/plain,text/csv,application/json">
               <span class="drop-icon" aria-hidden="true">+</span>
               <span class="drop-title">Upload network evidence</span>
-              <span class="drop-meta" id="fileMeta">.log, .txt, .csv, .gz, or JSON</span>
+              <span class="drop-meta" id="fileMeta">Drop one or more log, CSV, gzip, or JSON files</span>
             </label>
+            <div class="evidence-source-list" id="evidenceSourceList" aria-live="polite"></div>
           </div>
 
           <div class="panel-section workspace-card">
@@ -91,6 +92,11 @@
             <label class="field-label" for="protocolFilter">Protocol</label>
             <select id="protocolFilter">
               <option value="all">All protocols</option>
+            </select>
+
+            <label class="field-label" for="evidenceSourceFilter">Evidence source</label>
+            <select id="evidenceSourceFilter">
+              <option value="all">All evidence sources</option>
             </select>
           </div>
 
@@ -213,6 +219,58 @@
                 <div class="operations-model-summary" id="operationsDataEconomics"></div>
               </article>
             </div>
+
+            <article class="panel executive-findings-panel">
+              <div class="panel-header executive-panel-header">
+                <div>
+                  <p class="panel-kicker">Explainable attack urgency</p>
+                  <h2>Top 10 findings</h2>
+                </div>
+                <div class="executive-filterbar" aria-label="Top findings filters">
+                  <label class="sr-only" for="topFindingsPeriod">Reporting period</label>
+                  <select class="compact-select" id="topFindingsPeriod">
+                    <option value="evidence">Current evidence</option>
+                    <option value="24h">Last 24 hours</option>
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
+                    <option value="90d">Last 90 days</option>
+                  </select>
+                  <label class="sr-only" for="topFindingsSource">Evidence source</label>
+                  <select class="compact-select" id="topFindingsSource"><option value="all">All sources</option></select>
+                  <label class="sr-only" for="topFindingsSeverity">Severity</label>
+                  <select class="compact-select" id="topFindingsSeverity">
+                    <option value="all">All severities</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <label class="sr-only" for="topFindingsEnvironment">Environment</label>
+                  <select class="compact-select" id="topFindingsEnvironment"><option value="all">All environments</option></select>
+                  <button class="icon-button" id="resetTopFindingsButton" type="button" aria-label="Reset top findings filters" title="Reset top findings filters">&#8634;</button>
+                </div>
+              </div>
+              <div class="executive-table-status" id="topFindingsStatus" role="status" aria-live="polite">Analyze evidence to rank findings.</div>
+              <div class="executive-table-wrap">
+                <table class="executive-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      <th scope="col">Finding</th>
+                      <th scope="col">Urgency</th>
+                      <th scope="col">Trend</th>
+                      <th scope="col">Affected</th>
+                      <th scope="col">Blast</th>
+                      <th scope="col">Confidence</th>
+                      <th scope="col">Owner / status</th>
+                      <th scope="col">Last seen</th>
+                      <th scope="col"><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody id="topFindingsTable"></tbody>
+                </table>
+              </div>
+              <div class="executive-finding-detail" id="topFindingDetail" aria-live="polite"></div>
+            </article>
 
             <div class="section-divider">
               <div>
@@ -397,6 +455,7 @@
                   <thead id="recordsTableHead">
                     <tr>
                       <th><button class="th-button active" type="button" data-sort="start">Time</button></th>
+                      <th><button class="th-button" type="button" data-sort="evidenceSource">Evidence source</button></th>
                       <th><button class="th-button" type="button" data-sort="action">Action</button></th>
                       <th><button class="th-button" type="button" data-sort="source">Source</button></th>
                       <th><button class="th-button" type="button" data-sort="destination">Destination</button></th>
@@ -427,8 +486,8 @@
                 </div>
                 <div class="tool-body">
                   <label class="field-label" for="huntInput">Query</label>
-                  <input id="huntInput" type="search" placeholder="src:10.0.1.15 dst:8.8.8.8 port:443 action:ACCEPT proto:TCP bytes>100000 risk>50">
-                  <div class="hint-row">Fields: src, dst, port, action, proto, status, eni, bytes&gt;, bytes&lt;, packets&gt;, risk&gt;, app</div>
+                  <input id="huntInput" type="search" placeholder="file:prod-vpc src:10.0.1.15 port:443 action:ACCEPT bytes>100000 risk>50">
+                  <div class="hint-row">Fields: file, src, dst, port, action, proto, status, eni, bytes&gt;, bytes&lt;, packets&gt;, risk&gt;, app</div>
                   <div class="table-wrap compact-table">
                     <table>
                       <caption class="sr-only">Advanced hunt results</caption>
@@ -841,15 +900,127 @@
 
           <section class="tab-panel" id="topologyPanel" role="tabpanel" aria-labelledby="topologyTab" hidden>
             <div class="analysis-grid">
+              <article class="panel wide stitching-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Cross-source investigation</p>
+                    <h2>Event stitching</h2>
+                  </div>
+                  <span class="panel-note" id="stitchStatus" aria-live="polite">No normalized evidence</span>
+                </div>
+                <div class="stitch-toolbar" aria-label="Event stitching policy">
+                  <div>
+                    <label class="field-label" for="stitchWindowSelect">Correlation window</label>
+                    <select id="stitchWindowSelect">
+                      <option value="15">15 minutes</option>
+                      <option value="60">1 hour</option>
+                      <option value="240" selected>4 hours</option>
+                      <option value="1440">24 hours</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="stitchConfidenceSelect">Link policy</label>
+                    <select id="stitchConfidenceSelect">
+                      <option value="0.62" selected>Balanced (62%+)</option>
+                      <option value="0.75">High confidence (75%+)</option>
+                      <option value="0.85">Strict (85%+)</option>
+                    </select>
+                  </div>
+                  <div class="button-row stitch-toolbar-actions">
+                    <button class="ghost-button compact" id="rebuildStitchingButton" type="button">Rebuild</button>
+                    <button class="ghost-button compact" id="exportStitchingButton" type="button" disabled>Export chains</button>
+                  </div>
+                </div>
+                <div class="metric-grid compact-metrics stitch-metrics" id="stitchMetricGrid"></div>
+                <div class="stitch-workspace">
+                  <section class="stitch-chain-pane" aria-labelledby="stitchChainHeading">
+                    <div class="section-heading"><h3 id="stitchChainHeading">Incident chains</h3></div>
+                    <div class="stitch-chain-list" id="stitchChainList"></div>
+                  </section>
+                  <section class="stitch-detail-pane" aria-labelledby="stitchDetailHeading">
+                    <h3 class="sr-only" id="stitchDetailHeading">Selected incident chain</h3>
+                    <div id="stitchDetail"></div>
+                  </section>
+                </div>
+                <div class="stitch-gaps">
+                  <div class="section-heading"><h3>Coverage gaps and blocked joins</h3></div>
+                  <div class="quality-list" id="stitchGapList"></div>
+                </div>
+              </article>
+
               <article class="panel wide">
                 <div class="panel-header">
                   <div>
-                    <p class="panel-kicker">Visual topology</p>
-                    <h2>Entity-to-entity paths</h2>
+                    <p class="panel-kicker">Investigation visualization</p>
+                    <h2 id="topologyViewHeading">Entity-to-entity paths</h2>
                   </div>
                   <span class="panel-note" id="replayTimeLabel">All evidence</span>
                 </div>
-                <div class="topology-canvas" id="topologyCanvas"></div>
+                <div class="topology-mode-bar">
+                  <div class="segmented-control" id="topologyModeControl" aria-label="Visualization mode">
+                    <button type="button" class="active" data-topology-mode="graph" aria-pressed="true">Graph</button>
+                    <button type="button" data-topology-mode="activity" aria-pressed="false">Activity</button>
+                    <button type="button" data-topology-mode="matrix" aria-pressed="false">Matrix</button>
+                    <button type="button" data-topology-mode="geographic" aria-pressed="false">Geographic</button>
+                  </div>
+                  <span class="panel-note" id="heatmapStatusLabel" aria-live="polite">Observed communication graph</span>
+                </div>
+                <div class="heatmap-toolbar" id="heatmapToolbar" hidden>
+                  <div>
+                    <label class="field-label" for="heatmapGroupSelect">Group rows</label>
+                    <select id="heatmapGroupSelect">
+                      <option value="entity">Entity</option>
+                      <option value="subnet">Subnet /24</option>
+                      <option value="account">Cloud account</option>
+                      <option value="port">Destination port</option>
+                      <option value="protocol">Protocol</option>
+                      <option value="source">Evidence source</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="heatmapMetricSelect">Cell metric</label>
+                    <select id="heatmapMetricSelect">
+                      <option value="events">Flow events</option>
+                      <option value="bytes">Bytes</option>
+                      <option value="rejects">Rejected flows</option>
+                      <option value="risk">Risk weight</option>
+                      <option value="detections">Detection evidence</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="heatmapScaleSelect">Color scale</label>
+                    <select id="heatmapScaleSelect">
+                      <option value="log">Logarithmic</option>
+                      <option value="linear">Linear</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="heatmapEvidenceFilter">Evidence scope</label>
+                    <select id="heatmapEvidenceFilter">
+                      <option value="all">All replayed flows</option>
+                      <option value="detections">Detection evidence</option>
+                      <option value="stitched">Stitched incidents</option>
+                    </select>
+                  </div>
+                  <div class="heatmap-tool-actions" aria-label="Heatmap navigation">
+                    <button class="icon-button" id="heatmapZoomOutButton" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+                    <button class="icon-button" id="heatmapZoomInButton" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+                    <button class="icon-button" id="heatmapPanLeftButton" type="button" title="Pan left" aria-label="Pan left">←</button>
+                    <button class="icon-button" id="heatmapPanRightButton" type="button" title="Pan right" aria-label="Pan right">→</button>
+                    <button class="icon-button" id="heatmapPanUpButton" type="button" title="Pan up" aria-label="Pan up">↑</button>
+                    <button class="icon-button" id="heatmapPanDownButton" type="button" title="Pan down" aria-label="Pan down">↓</button>
+                    <button class="ghost-button compact" id="heatmapResetViewButton" type="button">Reset view</button>
+                    <button class="ghost-button compact" id="exportHeatmapButton" type="button">Export view</button>
+                  </div>
+                </div>
+                <div class="heatmap-context-bar" id="heatmapContextBar" hidden>
+                  <span id="heatmapSelectionLabel">No evidence region selected</span>
+                  <button class="ghost-button compact" id="clearHeatmapSelectionButton" type="button" disabled>Clear selection</button>
+                  <div class="heatmap-legend" aria-label="Heatmap intensity from no activity to highest activity">
+                    <span>Low</span><i class="heat-level-1"></i><i class="heat-level-3"></i><i class="heat-level-5"></i><i class="heat-level-7"></i><i class="heat-level-9"></i><span>High</span>
+                  </div>
+                </div>
+                <div class="topology-canvas" id="topologyCanvas" tabindex="0" aria-label="Investigation visualization canvas"></div>
                 <div class="tool-body replay-controls">
                   <div class="section-heading">
                     <label class="field-label" for="replayRangeInput">Time replay</label>
@@ -1605,6 +1776,94 @@
 
           <section class="tab-panel" id="reportsPanel" role="tabpanel" aria-labelledby="reportsTab" hidden>
             <div class="analysis-grid">
+              <article class="panel wide executive-brief-panel">
+                <div class="panel-header executive-panel-header">
+                  <div>
+                    <p class="panel-kicker">Leadership decision support</p>
+                    <h2>Executive security brief</h2>
+                  </div>
+                  <div class="header-actions">
+                    <button class="ghost-button compact" id="exportExecutivePdfButton" type="button">PDF</button>
+                    <button class="ghost-button compact" id="exportExecutiveCsvButton" type="button">CSV</button>
+                    <button class="ghost-button compact" id="exportExecutiveJsonButton" type="button">JSON</button>
+                    <button class="primary-button compact" id="generateExecutiveBriefButton" type="button">Generate brief</button>
+                  </div>
+                </div>
+                <div class="executive-brief-controls">
+                  <div>
+                    <label class="field-label" for="executivePeriodSelect">Period</label>
+                    <select id="executivePeriodSelect">
+                      <option value="7d">Last 7 days</option>
+                      <option value="30d" selected>Last 30 days</option>
+                      <option value="90d">Last 90 days</option>
+                      <option value="evidence">Current evidence</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="executiveClassificationSelect">Classification</label>
+                    <select id="executiveClassificationSelect">
+                      <option value="Internal">Internal</option>
+                      <option value="Confidential" selected>Confidential</option>
+                      <option value="Restricted">Restricted</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="executiveNarrativeSelect">Narrative</label>
+                    <select id="executiveNarrativeSelect">
+                      <option value="evidence">Evidence-cited</option>
+                      <option value="bedrock">Bedrock-assisted</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="field-label" for="executiveOrganizationInput">Organization</label>
+                    <input id="executiveOrganizationInput" type="text" maxlength="100" placeholder="Tenant organization">
+                  </div>
+                </div>
+                <div class="executive-table-status" id="executiveBriefStatus" role="status" aria-live="polite">Generate a brief from the current evidence and tenant operations data.</div>
+                <div id="executiveBriefOutput" class="executive-brief-output"></div>
+              </article>
+
+              <article class="panel wide report-schedule-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-kicker">Governed delivery</p>
+                    <h2>Executive report schedules</h2>
+                  </div>
+                  <span class="panel-note" id="reportScheduleAccessLabel">Admin managed</span>
+                </div>
+                <div class="report-schedule-layout">
+                  <form class="report-schedule-form" id="reportScheduleForm" novalidate>
+                    <div>
+                      <label class="field-label" for="reportScheduleNameInput">Schedule name</label>
+                      <input id="reportScheduleNameInput" type="text" maxlength="80" placeholder="Weekly leadership brief" required>
+                    </div>
+                    <div>
+                      <label class="field-label" for="reportScheduleFrequencySelect">Frequency</label>
+                      <select id="reportScheduleFrequencySelect"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+                    </div>
+                    <div>
+                      <label class="field-label" for="reportSchedulePeriodSelect">Evidence period</label>
+                      <select id="reportSchedulePeriodSelect"><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option></select>
+                    </div>
+                    <div>
+                      <label class="field-label" for="reportScheduleFormatSelect">Package</label>
+                      <select id="reportScheduleFormatSelect"><option value="pdf">PDF</option><option value="csv">CSV</option><option value="json">JSON</option></select>
+                    </div>
+                    <div>
+                      <label class="field-label" for="reportScheduleClassificationSelect">Classification</label>
+                      <select id="reportScheduleClassificationSelect"><option value="Internal">Internal</option><option value="Confidential" selected>Confidential</option><option value="Restricted">Restricted</option></select>
+                    </div>
+                    <div class="report-schedule-recipients">
+                      <label class="field-label" for="reportScheduleRecipientsInput">Tenant recipients</label>
+                      <input id="reportScheduleRecipientsInput" type="text" placeholder="ciso@example.com, soc-lead@example.com" required aria-describedby="reportScheduleMessage">
+                    </div>
+                    <button class="primary-button compact" id="saveReportScheduleButton" type="submit">Save schedule</button>
+                    <div class="form-message" id="reportScheduleMessage" role="status" aria-live="polite"></div>
+                  </form>
+                  <div class="report-schedule-list" id="reportScheduleList"></div>
+                </div>
+              </article>
+
               <article class="panel wide">
                 <div class="panel-header">
                   <div>
@@ -1840,6 +2099,6 @@
       </form>
     </dialog>
 
-    <script src="app.js?v=0.3.0"></script>
+    <script src="app.js?v=0.4.0"></script>
   </body>
 </html>

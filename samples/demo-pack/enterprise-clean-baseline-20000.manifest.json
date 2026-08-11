@@ -1,0 +1,76 @@
+{
+  "schema": "signalprism.demo-evidence.v1",
+  "product": "SignalPrism NDR",
+  "title": "Enterprise clean baseline",
+  "file": "enterprise-clean-baseline-20000.log",
+  "format": "AWS VPC Flow Logs v5 extended 29-field text",
+  "fixtureVersion": "2026.07.17",
+  "deterministicSeed": "0x13579bdf",
+  "analystStory": "Use this file first to save a stable baseline and understand normal entity, port, protocol, and path distributions.",
+  "physicalRecordLines": 20000,
+  "expectedParsedRecords": 20000,
+  "expectedParserIssues": 0,
+  "classificationCounts": {
+    "normal": 20000
+  },
+  "scenarioCounts": {
+    "normal-web-egress": 9000,
+    "normal-internal-application": 5000,
+    "normal-cloud-services": 2500,
+    "normal-dns-ntp": 2000,
+    "normal-background-rejects": 1200,
+    "normal-health-checks": 300
+  },
+  "timeRange": {
+    "start": "2026-07-14T00:00:00.000Z",
+    "end": "2026-07-14T23:59:59.000Z"
+  },
+  "attackWindow": null,
+  "primaryEntities": {
+    "compromisedApplicationHost": "10.40.20.44",
+    "dataExfiltrationSource": "10.40.30.90",
+    "productionBastion": "10.40.50.10",
+    "reconnaissanceSource": "198.51.100.66",
+    "bruteForceSource": "203.0.113.79",
+    "commandAndControl": "203.0.113.200",
+    "dnsTunnelResolver": "198.51.100.53",
+    "exfiltrationDestination": "198.51.100.250"
+  },
+  "expectedFindings": [
+    "No obvious NDR detections"
+  ],
+  "scenarios": {
+    "normal-web-egress": {
+      "classification": "normal",
+      "description": "Routine HTTPS and HTTP workload egress across web and application tiers.",
+      "count": 9000
+    },
+    "normal-internal-application": {
+      "classification": "normal",
+      "description": "Expected east-west application and service-mesh communication.",
+      "count": 5000
+    },
+    "normal-cloud-services": {
+      "classification": "normal",
+      "description": "Expected HTTPS traffic to representative cloud service endpoints.",
+      "count": 2500
+    },
+    "normal-dns-ntp": {
+      "classification": "normal",
+      "description": "Routine DNS and NTP traffic to link-local platform resolvers.",
+      "count": 2000
+    },
+    "normal-background-rejects": {
+      "classification": "normal",
+      "description": "Low-rate internet background noise rejected by perimeter controls.",
+      "count": 1200
+    },
+    "normal-health-checks": {
+      "classification": "normal",
+      "description": "Security and load-balancer health checks against web-tier workloads.",
+      "count": 300
+    }
+  },
+  "sha256": "a753d4a2f908ff43044dae86ae70208d2aaf35f7643d2cbd69d458bee141cb5c",
+  "sizeBytes": 5042640
+}

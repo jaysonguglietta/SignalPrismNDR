@@ -1,0 +1,147 @@
+{
+  "schema": "signalprism.demo-evidence.v1",
+  "product": "SignalPrism NDR",
+  "title": "Ransomware intrusion chain",
+  "file": "ransomware-intrusion-chain-25000.log",
+  "format": "AWS VPC Flow Logs v5 extended 29-field text",
+  "fixtureVersion": "2026.07.17",
+  "deterministicSeed": "0x2468ace0",
+  "analystStory": "A public scan and SSH brute force lead to accepted access, east-west spread, C2, staging, DNS tunneling, and large outbound exfiltration.",
+  "physicalRecordLines": 25000,
+  "expectedParsedRecords": 25000,
+  "expectedParserIssues": 0,
+  "classificationCounts": {
+    "normal": 22000,
+    "malicious": 3000
+  },
+  "scenarioCounts": {
+    "normal-web-egress": 9000,
+    "normal-internal-application": 6000,
+    "normal-cloud-services": 3000,
+    "normal-dns-ntp": 2500,
+    "normal-background-rejects": 1000,
+    "normal-health-checks": 500,
+    "attack-reconnaissance": 500,
+    "attack-ssh-bruteforce": 350,
+    "attack-public-ssh-access": 10,
+    "attack-lateral-movement": 500,
+    "attack-c2-beaconing": 180,
+    "attack-dns-tunneling": 300,
+    "attack-data-exfiltration": 60,
+    "attack-smb-spread": 700,
+    "attack-unusual-gre": 100,
+    "attack-data-staging": 300
+  },
+  "timeRange": {
+    "start": "2026-07-15T00:00:00.000Z",
+    "end": "2026-07-15T23:59:55.000Z"
+  },
+  "attackWindow": {
+    "start": "2026-07-15T17:00:00.000Z",
+    "end": "2026-07-15T22:26:36.000Z"
+  },
+  "primaryEntities": {
+    "compromisedApplicationHost": "10.40.20.44",
+    "dataExfiltrationSource": "10.40.30.90",
+    "productionBastion": "10.40.50.10",
+    "reconnaissanceSource": "198.51.100.66",
+    "bruteForceSource": "203.0.113.79",
+    "commandAndControl": "203.0.113.200",
+    "dnsTunnelResolver": "198.51.100.53",
+    "exfiltrationDestination": "198.51.100.250"
+  },
+  "expectedFindings": [
+    "Rejected SSH traffic",
+    "Source fan-out detected",
+    "Public SSH access accepted",
+    "Internal SMB access",
+    "Periodic outbound connection pattern",
+    "Suspicious DNS volume",
+    "Large accepted transfer",
+    "Unusual accepted protocol GRE"
+  ],
+  "scenarios": {
+    "normal-web-egress": {
+      "classification": "normal",
+      "description": "Routine HTTPS and HTTP workload egress across web and application tiers.",
+      "count": 9000
+    },
+    "normal-internal-application": {
+      "classification": "normal",
+      "description": "Expected east-west application and service-mesh communication.",
+      "count": 6000
+    },
+    "normal-cloud-services": {
+      "classification": "normal",
+      "description": "Expected HTTPS traffic to representative cloud service endpoints.",
+      "count": 3000
+    },
+    "normal-dns-ntp": {
+      "classification": "normal",
+      "description": "Routine DNS and NTP traffic to link-local platform resolvers.",
+      "count": 2500
+    },
+    "normal-background-rejects": {
+      "classification": "normal",
+      "description": "Low-rate internet background noise rejected by perimeter controls.",
+      "count": 1000
+    },
+    "normal-health-checks": {
+      "classification": "normal",
+      "description": "Security and load-balancer health checks against web-tier workloads.",
+      "count": 500
+    },
+    "attack-reconnaissance": {
+      "classification": "malicious",
+      "description": "Concentrated external scanning across administrative and data-service ports.",
+      "count": 500
+    },
+    "attack-ssh-bruteforce": {
+      "classification": "malicious",
+      "description": "Repeated SSH authentication attempts against the production bastion.",
+      "count": 350
+    },
+    "attack-public-ssh-access": {
+      "classification": "malicious",
+      "description": "Accepted SSH access from an untrusted public source after brute-force activity.",
+      "count": 10
+    },
+    "attack-lateral-movement": {
+      "classification": "malicious",
+      "description": "Compromised workload access to internal SSH, SMB, RDP, and database services.",
+      "count": 500
+    },
+    "attack-c2-beaconing": {
+      "classification": "malicious",
+      "description": "Regular outbound TLS-like callbacks from the compromised application host.",
+      "count": 180
+    },
+    "attack-dns-tunneling": {
+      "classification": "malicious",
+      "description": "High-volume DNS flows from the compromised host to an unapproved resolver.",
+      "count": 300
+    },
+    "attack-data-exfiltration": {
+      "classification": "malicious",
+      "description": "Large encrypted transfers from a data-tier workload to an untrusted endpoint.",
+      "count": 60
+    },
+    "attack-smb-spread": {
+      "classification": "malicious",
+      "description": "High-cardinality SMB fan-out consistent with worm or ransomware propagation.",
+      "count": 700
+    },
+    "attack-unusual-gre": {
+      "classification": "malicious",
+      "description": "Accepted GRE traffic from a workload without an approved tunneling use case.",
+      "count": 100
+    },
+    "attack-data-staging": {
+      "classification": "malicious",
+      "description": "Large east-west transfers into the compromised host before external exfiltration.",
+      "count": 300
+    }
+  },
+  "sha256": "7aae53ddd083b906a2a404cbd762f2039b1d2d2dcd4f7b61b035f270574f57f1",
+  "sizeBytes": 6308833
+}

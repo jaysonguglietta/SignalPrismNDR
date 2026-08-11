@@ -1,5 +1,52 @@
 import { expect, test } from "@playwright/test";
 
+function stitchingEvidenceFiles() {
+  const cloudTrail = {
+    Records: [{
+      eventVersion: "1.09",
+      eventID: "ct-privilege",
+      eventTime: "2026-07-16T20:00:00Z",
+      eventSource: "iam.amazonaws.com",
+      eventName: "AttachRolePolicy",
+      awsRegion: "us-east-1",
+      recipientAccountId: "123456789012",
+      sourceIPAddress: "10.0.1.12",
+      userIdentity: { arn: "arn:aws:iam::123456789012:user/compromised-admin" },
+      requestParameters: { roleArn: "arn:aws:iam::123456789012:role/ProductionAdmin" }
+    }]
+  };
+  const suricata = {
+    timestamp: "2026-07-16T20:01:30Z",
+    event_type: "alert",
+    flow_id: 991,
+    src_ip: "10.0.1.12",
+    src_port: 51234,
+    dest_ip: "198.51.100.44",
+    dest_port: 443,
+    proto: "TCP",
+    community_id: "1:test-session",
+    alert: { severity: 1, signature: "Known C2 TLS callback", category: "Command and Control", action: "allowed" }
+  };
+  const dns = [
+    { query_timestamp: "2026-07-16T20:02:30Z", srcaddr: "10.0.1.12", query_name: `${"x".repeat(64)}.exfil.example.`, query_type: "A", account_id: "123456789012" },
+    { query_timestamp: "2026-07-16T20:02:40Z", srcaddr: "10.0.1.12", query_name: `${"y".repeat(64)}.exfil.example.`, query_type: "A", account_id: "123456789012" }
+  ];
+  const flowStart = Math.floor(Date.parse("2026-07-16T20:01:00Z") / 1000);
+  return [
+    { name: "cloudtrail.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(cloudTrail)) },
+    { name: "vpc-flow.log", mimeType: "text/plain", buffer: Buffer.from(`2 123456789012 eni-compromised 10.0.1.12 198.51.100.44 51234 443 6 32 15480 ${flowStart} ${flowStart + 10} ACCEPT OK\n`) },
+    { name: "suricata.jsonl", mimeType: "application/x-ndjson", buffer: Buffer.from(JSON.stringify(suricata)) },
+    { name: "route53.jsonl", mimeType: "application/x-ndjson", buffer: Buffer.from(dns.map((event) => JSON.stringify(event)).join("\n")) }
+  ];
+}
+
+async function stabilizeVisualState(page) {
+  await page.evaluate(() => {
+    document.documentElement.classList.add("visual-test-mode");
+    document.querySelectorAll(".toast").forEach((toast) => toast.remove());
+  });
+}
+
 test("dashboard demo visual state", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Demo" }).click();
@@ -7,19 +54,98 @@ test("dashboard demo visual state", async ({ page }) => {
   await expect(page.locator("#inputMessage")).not.toContainText("Case status is invalid");
   await expect(page.getByRole("heading", { name: "SignalPrism NDR" })).toBeVisible();
   await expect(page.getByText("NDR risk")).toBeVisible();
+  await stabilizeVisualState(page);
   await expect(page).toHaveScreenshot("dashboard-demo.png", { fullPage: true });
+});
+
+test("top findings rank and isolate linked evidence", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Demo" }).click();
+  await expect(page.locator("#topFindingsStatus")).toContainText("consolidated findings ranked");
+  await expect(page.locator("#topFindingsTable tr[data-top-finding-row]")).toHaveCount(8);
+  await expect(page.locator("#topFindingDetail")).toContainText("Urgency");
+  await expect(page.locator("#topFindingDetail")).toContainText("Asset criticality");
+  await page.locator("#topFindingDetail [data-top-evidence]").click();
+  await expect(page.getByRole("tab", { name: "Records" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#recordCountLabel")).toHaveText("5 records");
+});
+
+test("executive brief and governed tenant-inbox schedule", async ({ page }, testInfo) => {
+  await page.route(/\/api\/cases(?:\?.*)?$/, (route) => {
+    const fixedCase = { id: "executive-case-1", title: "Review public administration path", status: "Open", severity: "high", assignee: "SOC lead", createdAt: "2026-07-17T12:00:00Z", updatedAt: "2026-07-17T12:00:00Z" };
+    if (route.request().method() === "GET") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([fixedCase]) });
+    return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ ...fixedCase, ...route.request().postDataJSON() }) });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Demo" }).click();
+  await expect(page.locator("#toastRegion")).toContainText("Guided demo workspace loaded");
+  await page.getByRole("tab", { name: "Reports" }).click();
+  await expect(page.getByRole("tab", { name: "Reports" })).toHaveAttribute("aria-selected", "true");
+  await page.locator("#generateExecutiveBriefButton").click();
+  await expect(page.locator("#executiveBriefStatus")).toContainText("Confidential");
+  await expect(page.locator(".report-metrics-table tbody tr")).toHaveCount(7);
+  await expect(page.locator(".report-findings-table tbody tr")).toHaveCount(8);
+  await expect(page.locator(".executive-narrative")).toContainText("[F1]");
+  await stabilizeVisualState(page);
+  await expect(page).toHaveScreenshot("executive-reporting.png", { fullPage: true });
+
+  const scheduleName = `Weekly leadership brief ${testInfo.project.name}`;
+  await page.locator("#reportScheduleNameInput").fill(scheduleName);
+  await page.locator("#reportScheduleRecipientsInput").fill("ciso@signalprism.local");
+  await page.locator("#saveReportScheduleButton").click();
+  await expect(page.locator("#reportScheduleMessage")).toContainText("Schedule saved");
+  const scheduleRow = page.locator(".schedule-row").filter({ hasText: scheduleName });
+  await expect(scheduleRow).toHaveCount(1);
+  await scheduleRow.locator("[data-run-report-schedule]").click();
+  const deliveryRow = page.locator(".schedule-row").filter({ hasText: `${scheduleName} delivery` });
+  await expect(deliveryRow).toHaveCount(1);
+  await expect(deliveryRow.locator("[data-download-report-delivery]")).toHaveCount(1);
+  await expect(deliveryRow).toContainText("delivered");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
 test("topology replay visual state", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Sample" }).click();
+  await page.locator("#fileInput").setInputFiles(stitchingEvidenceFiles());
   await page.getByRole("tab", { name: "Topology" }).click();
   await page.locator("#replayRangeInput").evaluate((input) => {
     input.value = "55";
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await expect(page.getByText("Entity-to-entity paths")).toBeVisible();
+  await stabilizeVisualState(page);
   await expect(page).toHaveScreenshot("topology-replay.png", { fullPage: true });
+});
+
+test("investigation heatmaps filter linked evidence", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Sample" }).click();
+  await page.getByRole("tab", { name: "Topology" }).click();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Time activity heatmap" })).toBeVisible();
+  await expect(page.locator('[data-heat-kind="activity"]:not(.heat-level-0)')).toHaveCount(20);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await stabilizeVisualState(page);
+  await expect(page).toHaveScreenshot("activity-heatmap.png", { fullPage: true });
+
+  await page.locator('[data-heat-kind="activity"]:not(.heat-level-0)').first().click();
+  await expect(page.locator("#heatmapSelectionLabel")).toContainText("1 records");
+  await expect(page.locator("#recordCountLabel")).toHaveText("1 record");
+  await page.locator("#clearHeatmapSelectionButton").click();
+
+  await page.getByRole("button", { name: "Matrix", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Communication matrix" })).toBeVisible();
+  await expect(page.locator('[data-heat-kind="matrix"]:not(.heat-level-0)')).toHaveCount(8);
+  await page.locator('[data-heat-kind="matrix"]:not(.heat-level-0)').first().click();
+  await expect(page.locator("#heatmapSelectionLabel")).toContainText("to");
+  await page.locator("#clearHeatmapSelectionButton").click();
+
+  await page.getByRole("button", { name: "Geographic", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Geographic network activity" })).toBeVisible();
+  await expect(page.locator('[data-heat-kind="geographic"]')).toHaveCount(2);
+  await page.locator('[data-heat-kind="geographic"]').first().click();
+  await expect(page.locator("#heatmapSelectionLabel")).toContainText("records");
+  await expect(page.locator("#heatmapStatusLabel")).toContainText("approximate locations");
 });
 
 test("analyst learning center visual state", async ({ page }) => {
@@ -29,6 +155,7 @@ test("analyst learning center visual state", async ({ page }) => {
   await expect(page.getByText("From network activity to response")).toBeVisible();
   await page.getByText("VPC Flow Log", { exact: true }).click();
   await expect(page.getByText("A metadata record describing a network flow")).toBeVisible();
+  await stabilizeVisualState(page);
   await expect(page).toHaveScreenshot("analyst-learning-center.png", { fullPage: true });
 });
 
@@ -40,7 +167,7 @@ test("learning center links into operational workflows", async ({ page }) => {
   await page.getByRole("tab", { name: "Learn" }).click();
   await page.getByRole("button", { name: "Practice with guided demo" }).click();
   await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator("#statusText")).toContainText("11 records");
+  await expect(page.locator("#statusText")).toContainText("11 flows");
 });
 
 test("admin tenant management visual state", async ({ page }) => {
@@ -100,6 +227,7 @@ test("admin tenant management visual state", async ({ page }) => {
   await expect(page.getByText("Users and roles")).toBeVisible();
   await expect(page.locator("#sourceOwnershipList")).toContainText("Prod AWS VPC");
   await expect(page.locator("#exportApprovalList")).toContainText("No export requests");
+  await stabilizeVisualState(page);
   await expect(page).toHaveScreenshot("admin-tenant.png", { fullPage: true });
 });
 
@@ -110,12 +238,50 @@ test("upload and detection tuning workflow", async ({ page }) => {
     mimeType: "text/plain",
     buffer: Buffer.from("2 123456789012 eni-test 10.0.0.5 8.8.8.8 55123 53 17 4 512 1714771200 1714771260 ACCEPT OK\n")
   });
-  await expect(page.locator("#statusText")).toContainText("1 record");
+  await expect(page.locator("#statusText")).toContainText("1 flows");
   await page.getByRole("tab", { name: "Detections" }).click();
   await page.locator("#ruleProfileSelect").selectOption("focused");
   await page.locator("#applyRuleProfileButton").click();
   await expect(page.locator("#ruleProfileDescription")).toContainText("Focused");
   await expect(page.locator("#toastRegion")).toContainText("Detection profile set to focused");
+});
+
+test("multi-file upload preserves and filters source provenance", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#fileInput").setInputFiles([
+    {
+      name: "prod-vpc.log",
+      mimeType: "text/plain",
+      buffer: Buffer.from("2 123456789012 eni-prod 10.0.0.5 8.8.8.8 55123 53 17 4 512 1714771200 1714771260 ACCEPT OK\n")
+    },
+    {
+      name: "shared-services.log",
+      mimeType: "text/plain",
+      buffer: Buffer.from("2 123456789012 eni-shared 198.51.100.20 10.0.1.15 50000 22 6 2 128 1714771300 1714771360 REJECT OK\n")
+    }
+  ]);
+  await expect(page.locator("#statusText")).toContainText("2 flows, 2 normalized events from 2 sources");
+  await expect(page.locator("#evidenceSourceList")).toContainText("prod-vpc.log");
+  await expect(page.locator("#evidenceSourceList")).toContainText("shared-services.log");
+  await page.locator("#evidenceSourceFilter").selectOption("evidence-source-2");
+  await expect(page.locator("#recordCountLabel")).toHaveText("1 record");
+  await expect(page.locator("#recordsTable")).toContainText("shared-services.log");
+  await expect(page.locator("#recordsTable")).not.toContainText("prod-vpc.log");
+});
+
+test("mixed evidence sources build an explainable incident chain", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#fileInput").setInputFiles(stitchingEvidenceFiles());
+  await expect(page.locator("#statusText")).toContainText("1 flows, 5 normalized events from 4 sources");
+  await expect(page.locator("#evidenceSourceList")).toContainText("cloudtrail");
+  await expect(page.locator("#evidenceSourceList")).toContainText("suricata");
+  await expect(page.locator("#evidenceSourceList")).toContainText("route53-dns");
+  await page.getByRole("tab", { name: "Topology" }).click();
+  await expect(page.locator("#stitchStatus")).toContainText("1 chains");
+  await expect(page.locator("#stitchChainList")).toContainText("chain involving");
+  await expect(page.locator("#stitchDetail")).toContainText("Independent evidence from");
+  await expect(page.locator("#stitchDetail")).toContainText("cloudtrail.json");
+  await expect(page.locator("#stitchGapList")).toContainText("No material stitching gaps");
 });
 
 test("AI summary handles enabled backend response", async ({ page }) => {
@@ -250,5 +416,6 @@ test("enterprise platform operations workspace", async ({ page }) => {
   await expect(page.locator("#campaignList")).toContainText("Command and Control campaign");
   await expect(page.locator("#connectorList")).toContainText("Production Splunk");
   await expect(page.locator("#trafficPostureList")).toContainText("unsanctioned AI events");
+  await stabilizeVisualState(page);
   await expect(page).toHaveScreenshot("platform-operations.png", { fullPage: true });
 });

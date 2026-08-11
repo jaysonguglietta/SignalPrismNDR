@@ -33,7 +33,7 @@ async function testApiAuth() {
     PORT: "4191",
     NDR_DATA_DIR: dataDir,
     NDR_API_KEY: "integration-key",
-    NDR_RATE_LIMIT_MAX: "100",
+    NDR_RATE_LIMIT_MAX: "2000",
     NDR_STORE: "local"
   });
   const base = "http://127.0.0.1:4191";
@@ -302,13 +302,13 @@ async function testTenantScopedRbac() {
     PORT: "4193",
     NDR_DATA_DIR: dataDir,
     NDR_TEST_AUTH_ENABLED: "true",
-    NDR_RATE_LIMIT_MAX: "100",
+    NDR_RATE_LIMIT_MAX: "2000",
     NDR_MAX_PENDING_EXPORT_APPROVALS: "2",
     NDR_STORE: "local"
   });
   const base = "http://127.0.0.1:4193";
   const analyst = testPrincipal({ subject: "analyst-a", roles: ["analyst"], tenantId: "tenant-a" });
-  const analystOther = testPrincipal({ subject: "analyst-other", roles: ["analyst"], tenantId: "tenant-a" });
+  const analystOther = testPrincipal({ subject: "analyst-other", roles: ["analyst"], tenantId: "tenant-a", sourceAccessMode: "assigned", sourceIds: [] });
   const admin = testPrincipal({ subject: "admin-a", email: "admin-a@example.com", roles: ["admin"], tenantId: "tenant-a" });
   const viewer = testPrincipal({ subject: "viewer-a", roles: ["viewer"], tenantId: "tenant-a" });
   const analystB = testPrincipal({ subject: "analyst-b", roles: ["analyst"], tenantId: "tenant-b" });
@@ -412,6 +412,22 @@ async function testTenantScopedRbac() {
     });
     assert.equal(viewerArtifactSave.status, 403);
 
+    const analystScheduleSave = await fetch(`${base}/api/enterprise/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": analyst },
+      body: JSON.stringify({ id: "report-schedule-governed", type: "REPORT_SCHEDULE", title: "Weekly leadership brief", payload: { name: "Weekly leadership brief", frequency: "weekly", period: "7d", format: "pdf", recipients: ["ciso@example.com"] } })
+    });
+    assert.equal(analystScheduleSave.status, 403);
+
+    const adminScheduleSave = await fetch(`${base}/api/enterprise/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": admin },
+      body: JSON.stringify({ id: "report-schedule-governed", type: "REPORT_SCHEDULE", title: "Weekly leadership brief", payload: { name: "Weekly leadership brief", frequency: "weekly", period: "7d", format: "pdf", classification: "Confidential", recipients: ["ciso@example.com"] } })
+    });
+    assert.equal(adminScheduleSave.status, 200);
+    const viewerSchedules = await fetch(`${base}/api/enterprise/artifacts?type=REPORT_SCHEDULE`, { headers: { "x-ndr-test-principal": viewer } });
+    assert.deepEqual(await viewerSchedules.json(), [], "report schedule recipients must not be exposed to viewers");
+
     const ownedSource = await fetch(`${base}/api/sources`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-ndr-test-principal": analyst },
@@ -430,6 +446,22 @@ async function testTenantScopedRbac() {
     assert.equal(unownedSource.status, 201);
     const unassignedAnalystSources = await fetch(`${base}/api/sources`, { headers: { "x-ndr-test-principal": analystOther } });
     assert.deepEqual(await unassignedAnalystSources.json(), [], "empty source assignments must deny access for non-admin identities");
+
+    const unownedSourceBody = await unownedSource.json();
+    const ownedOnly = testPrincipal({ subject: "owned-only", roles: ["analyst"], tenantId: "tenant-a", sourceAccessMode: "assigned", sourceIds: [ownedSourceBody.id] });
+    const adminOnly = testPrincipal({ subject: "admin-pool-only", roles: ["analyst"], tenantId: "tenant-a", sourceAccessMode: "assigned", sourceIds: [unownedSourceBody.id] });
+    for (const [sourceId, eventID, sourceIPAddress] of [[ownedSourceBody.id, "owned-event", "10.0.0.10"], [unownedSourceBody.id, "admin-event", "10.0.0.20"]]) {
+      const response = await fetch(`${base}/api/telemetry/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-ndr-test-principal": admin },
+        body: JSON.stringify({ sourceId, format: "cloudtrail", payload: [{ eventID, eventVersion: "1.09", eventTime: "2026-07-16T12:00:00Z", eventSource: "ec2.amazonaws.com", eventName: "DescribeInstances", sourceIPAddress }] })
+      });
+      assert.equal(response.status, 201);
+    }
+    const ownedOnlyEvents = await (await fetch(`${base}/api/telemetry/events`, { headers: { "x-ndr-test-principal": ownedOnly } })).json();
+    const adminOnlyEvents = await (await fetch(`${base}/api/telemetry/events`, { headers: { "x-ndr-test-principal": adminOnly } })).json();
+    assert.deepEqual(ownedOnlyEvents.map((event) => event.sourceId), [ownedSourceBody.id]);
+    assert.deepEqual(adminOnlyEvents.map((event) => event.sourceId), [unownedSourceBody.id]);
 
     const ownershipRewriteDenied = await fetch(`${base}/api/sources`, {
       method: "POST",
@@ -502,6 +534,32 @@ async function testTenantScopedRbac() {
     });
     assert.equal(approvedExport.status, 200);
     assert.equal((await approvedExport.json()).source, "tenant-a");
+
+    const executiveRequest = await fetch(`${base}/api/exports/investigation`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": analyst },
+      body: JSON.stringify({ reportType: "executive-brief", format: "pdf", report: { id: "executive-1", title: "Executive Security Brief", tenantId: "tenant-a" } })
+    });
+    assert.equal(executiveRequest.status, 202);
+    const executiveApproval = (await executiveRequest.json()).approval;
+    assert.equal(executiveApproval.label, "Executive security brief");
+    assert.equal(executiveApproval.format, "pdf");
+    assert.equal(executiveApproval.payload, undefined, "approval metadata must not disclose report content");
+    assert.equal((await fetch(`${base}/api/export-approvals/${executiveApproval.id}/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": admin },
+      body: "{}"
+    })).status, 200);
+    const executiveExport = await fetch(`${base}/api/exports/investigation`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ndr-test-principal": analyst },
+      body: JSON.stringify({ approvalId: executiveApproval.id })
+    });
+    assert.equal(executiveExport.status, 200);
+    const executiveExportBody = await executiveExport.json();
+    assert.equal(executiveExportBody.reportType, "executive-brief");
+    assert.equal(executiveExportBody.format, "pdf");
+    assert.equal(executiveExportBody.report.id, "executive-1");
 
     const replayedExport = await fetch(`${base}/api/exports/investigation`, {
       method: "POST",
@@ -580,7 +638,8 @@ async function testTenantScopedRbac() {
       headers: { "content-type": "application/json", "x-ndr-test-principal": analyst },
       body: JSON.stringify({ events: Array.from({ length: 5 }, (_, index) => ({ id: `rule-fixture-${index}`, timestamp: new Date(Date.parse("2026-07-16T12:00:00Z") + index * 60_000).toISOString(), sourceIp: "10.0.0.10", destinationIp: "10.0.0.20", destinationPort: index === 0 ? 5432 : 443, action: "connect" })) })
     });
-    assert.equal(detectionFixture.status, 201);
+    const detectionFixtureBody = await detectionFixture.json();
+    assert.equal(detectionFixture.status, 201, detectionFixtureBody.error);
     const backtestRule = await fetch(`${base}/api/detection-rules/${governedRule.id}/backtest`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-ndr-test-principal": analyst },
@@ -632,7 +691,7 @@ async function testEnterpriseSecurityOperations() {
     PORT: "4195",
     NDR_DATA_DIR: dataDir,
     NDR_TEST_AUTH_ENABLED: "true",
-    NDR_RATE_LIMIT_MAX: "500",
+    NDR_RATE_LIMIT_MAX: "5000",
     NDR_STORE: "local",
     NDR_DETECTION_CONTENT_PUBLIC_KEY_B64: publicKeyB64,
     NDR_PACKET_ALLOWED_BUCKETS: "integration-evidence",
@@ -645,6 +704,7 @@ async function testEnterpriseSecurityOperations() {
   const base = "http://127.0.0.1:4195";
   const analyst = testPrincipal({ subject: "analyst-a", email: "analyst-a@example.com", roles: ["analyst"], tenantId: "tenant-a" });
   const admin = testPrincipal({ subject: "admin-a", email: "admin-a@example.com", roles: ["admin"], tenantId: "tenant-a" });
+  const verifierAdmin = testPrincipal({ subject: "verifier-a", email: "verifier-a@example.com", roles: ["admin"], tenantId: "tenant-a" });
   const viewer = testPrincipal({ subject: "viewer-a", email: "viewer-a@example.com", roles: ["viewer"], tenantId: "tenant-a" });
   const otherAdmin = testPrincipal({ subject: "admin-b", email: "admin-b@example.com", roles: ["admin"], tenantId: "tenant-b" });
   try {
@@ -739,7 +799,7 @@ async function testEnterpriseSecurityOperations() {
     assert.match(serviceAccount.token, /^spn_/);
     const serviceAccountRead = await fetch(`${base}/api/telemetry/events`, { headers: { authorization: `Bearer ${serviceAccount.token}` } });
     assert.equal(serviceAccountRead.status, 200);
-    assert.equal((await serviceAccountRead.json()).length, 7);
+    assert.equal((await serviceAccountRead.json()).length, 0, "new service accounts must fail closed until sources are assigned");
 
     const scimUnauthorized = await fetch(`${base}/scim/v2/Users`);
     assert.equal(scimUnauthorized.status, 401);
@@ -821,7 +881,9 @@ async function testEnterpriseSecurityOperations() {
     assert.equal(regionPolicyResponse.status, 201);
     assert.equal((await regionPolicyResponse.json()).payload.region, "us-east-1");
 
-    const agentEvaluationResponse = await fetch(`${base}/api/agent/evaluations`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": analyst }, body: JSON.stringify({ run: { id: "inline-agent-run", citations: [{ id: "evidence-1" }], claims: [{ citationIds: ["evidence-1"] }], toolCalls: [] } }) });
+    const inlineAgentEvaluation = await fetch(`${base}/api/agent/evaluations`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": analyst }, body: JSON.stringify({ run: { id: "inline-agent-run", citations: [{ id: "evidence-1" }] } }) });
+    assert.equal(inlineAgentEvaluation.status, 400);
+    const agentEvaluationResponse = await fetch(`${base}/api/agent/evaluations`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": analyst }, body: JSON.stringify({ runId: aiRun.id }) });
     assert.equal(agentEvaluationResponse.status, 201);
     assert.equal((await agentEvaluationResponse.json()).passed, true);
 
@@ -850,7 +912,11 @@ async function testEnterpriseSecurityOperations() {
     const approve = await fetch(`${base}/api/response-actions/${responseAction.id}/approve`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": admin }, body: "{}" });
     assert.equal(approve.status, 200);
     assert.equal((await approve.json()).status, "approved");
-    const verifyResponse = await fetch(`${base}/api/response-actions/${responseAction.id}/verify`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": analyst }, body: JSON.stringify({ successful: true, evidence: "No additional authentication attempts were observed after the dry run." }) });
+    const requesterVerify = await fetch(`${base}/api/response-actions/${responseAction.id}/verify`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": analyst }, body: JSON.stringify({ successful: true, evidence: "Self-attested result" }) });
+    assert.equal(requesterVerify.status, 403);
+    const approverVerify = await fetch(`${base}/api/response-actions/${responseAction.id}/verify`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": admin }, body: JSON.stringify({ successful: true, evidence: "Approver-attested result" }) });
+    assert.equal(approverVerify.status, 403);
+    const verifyResponse = await fetch(`${base}/api/response-actions/${responseAction.id}/verify`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": verifierAdmin }, body: JSON.stringify({ successful: true, evidence: "No additional authentication attempts were observed after the dry run." }) });
     assert.equal(verifyResponse.status, 200);
     assert.equal((await verifyResponse.json()).status, "verified");
     const rollbackResponse = await fetch(`${base}/api/response-actions/${responseAction.id}/rollback`, { method: "POST", headers: { "content-type": "application/json", "x-ndr-test-principal": admin }, body: JSON.stringify({ reason: "Restore the managed block list after successful validation." }) });
@@ -955,6 +1021,13 @@ async function testRequestBodyLimit() {
 }
 
 async function testProductionStartupControls() {
+  const productionStorage = {
+    NDR_STORE: "dynamodb",
+    NDR_DDB_TABLE: "signalprism-integration",
+    NDR_AUDIT_BUCKET: "signalprism-audit-integration",
+    NDR_AUDIT_OBJECT_STORAGE_REQUIRED: "true",
+    NDR_EXPORT_PAYLOAD_BUCKET: "signalprism-staging-integration"
+  };
   const testAuthFailure = await runRejectedServer({
     NODE_ENV: "production",
     NDR_TEST_AUTH_ENABLED: "true"
@@ -971,6 +1044,7 @@ async function testProductionStartupControls() {
   assert.match(evidenceScanFailure, /require NDR_EVIDENCE_STAGING_BUCKET/);
 
   const weakSecretFailure = await runRejectedServer({
+    ...productionStorage,
     NODE_ENV: "production",
     NDR_PRODUCTION_HARDENING: "true",
     NDR_API_KEY: "a-secure-api-key-value-123456",
@@ -980,7 +1054,19 @@ async function testProductionStartupControls() {
   });
   assert.match(weakSecretFailure, /NDR_SESSION_SECRET must contain at least 32 characters/);
 
+  const localStoreFailure = await runRejectedServer({
+    NODE_ENV: "production",
+    NDR_PRODUCTION_HARDENING: "true",
+    NDR_API_KEY: "a-secure-api-key-value-123456",
+    NDR_SESSION_SECRET: "session-signing-key-material-1234567890",
+    NDR_EVIDENCE_ATTESTATION_SECRET: "evidence-attestation-key-material-123456",
+    NDR_SESSION_COOKIE_SECURE: "true",
+    NDR_STORE: "local"
+  });
+  assert.match(localStoreFailure, /requires NDR_STORE=dynamodb/);
+
   const queueFailure = await runRejectedServer({
+    ...productionStorage,
     NODE_ENV: "production",
     NDR_PRODUCTION_HARDENING: "true",
     NDR_API_KEY: "a-secure-api-key-value-123456",
@@ -992,6 +1078,7 @@ async function testProductionStartupControls() {
   assert.match(queueFailure, /requires NDR_QUEUE_URL/);
 
   const schedulerFailure = await runRejectedServer({
+    ...productionStorage,
     NODE_ENV: "production",
     NDR_PRODUCTION_HARDENING: "true",
     NDR_API_KEY: "a-secure-api-key-value-123456",
@@ -1111,5 +1198,6 @@ function stopServer(child) {
 }
 
 function testPrincipal(principal) {
-  return JSON.stringify(principal);
+  const hasSourcePolicy = principal.sourceAccessMode || Array.isArray(principal.sourceIds) || Array.isArray(principal.sourceGroupIds);
+  return JSON.stringify(hasSourcePolicy || (principal.roles || []).includes("admin") ? principal : { ...principal, sourceAccessMode: "all" });
 }
